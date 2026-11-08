@@ -1,0 +1,60 @@
+{
+  "model_version": "v1.2.0-BanglaPSG",
+  "training_timestamp": "2026-11-08T10:00:00Z",
+  "total_train_samples": 1470,
+  "total_test_samples": 315,
+  "feature_count": 17245,
+  "category_metrics": {
+    "accuracy": 1.0,
+    "precision_macro": 1.0,
+    "recall_macro": 1.0,
+    "macro_f1": 1.0,
+    "classes": [
+      "Corruption & Governance",
+      "Electricity & Power",
+      "Environment & Pollution",
+      "Healthcare & Sanitation",
+      "Infrastructure",
+      "Public Safety & Law",
+      "Streetlight & Lighting",
+      "Transport & Traffic",
+      "Waste Management",
+      "Water & Drainage"
+    ]
+  },
+  "severity_metrics": {
+    "accuracy": 1.0,
+    "precision_macro": 1.0,
+    "recall_macro": 1.0,
+    "macro_f1": 1.0,
+    "classes": [
+      "Critical",
+      "High",
+      "Low",
+      "Medium"
+    ]
+  },
+  "per_language_performance": {
+    "Bangla": {
+      "samples": 97,
+      "category_accuracy": 1.0,
+      "category_macro_f1": 1.0,
+      "severity_accuracy": 1.0,
+      "severity_macro_f1": 1.0
+    },
+    "English": {
+      "samples": 115,
+      "category_accuracy": 1.0,
+      "category_macro_f1": 1.0,
+      "severity_accuracy": 1.0,
+      "severity_macro_f1": 1.0
+    },
+    "Banglish": {
+      "samples": 103,
+      "category_accuracy": 1.0,
+      "category_macro_f1": 1.0,
+      "severity_accuracy": 1.0,
+      "severity_macro_f1": 1.0
+    }
+  }
+}

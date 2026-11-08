@@ -1,0 +1,36 @@
+{
+  "dataset_name": "CivicAI Bangladesh Multilingual Civic Corpus (BanglaPSG Aligned)",
+  "version": "1.0.0",
+  "creation_date": "2026-11-08",
+  "description": "Curated multimodal public complaint dataset covering 10 civic categories, 4 severity levels, and 3 languages (Bangla, English, Banglish).",
+  "total_samples": 2100,
+  "splits": {
+    "train": 1470,
+    "val": 315,
+    "test": 315
+  },
+  "license": "CC BY-SA 4.0 / Open Access for Civic and Academic Research",
+  "domains": [
+    "Infrastructure",
+    "Water & Drainage",
+    "Waste Management",
+    "Electricity & Power",
+    "Streetlight & Lighting",
+    "Public Safety & Law",
+    "Environment & Pollution",
+    "Healthcare & Sanitation",
+    "Corruption & Governance",
+    "Transport & Traffic"
+  ],
+  "severities": [
+    "Critical",
+    "High",
+    "Medium",
+    "Low"
+  ],
+  "languages": [
+    "bn (Bangla)",
+    "en (English)",
+    "bn-en (Banglish)"
+  ]
+}
