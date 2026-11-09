@@ -6,7 +6,8 @@ import {
   User
 } from './types';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+// Use the deployed Render API by default; VITE_API_URL can override it per environment.
+const API_BASE = (import.meta.env.VITE_API_URL || 'https://civicai-bangladesh.onrender.com').replace(/\/+$/, '');
 
 function getAuthHeader(): Record<string, string> {
   const token = localStorage.getItem('civicai_token');
