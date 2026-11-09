@@ -29,8 +29,8 @@ export function App() {
 
   useEffect(() => {
     // Establish real-time WebSocket connection
-    const wsUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') +
-      (window.location.hostname || 'localhost') + ':8000/ws/complaints';
+    const apiBase = (import.meta.env.VITE_API_URL || 'https://civicai-bangladesh.onrender.com').replace(/\/+$/, '');
+    const wsUrl = apiBase.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:') + '/ws/complaints';
 
     let socket: WebSocket | null = null;
     try {
