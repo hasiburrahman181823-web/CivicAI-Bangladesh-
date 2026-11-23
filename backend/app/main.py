@@ -3,8 +3,6 @@ import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from threading import BoundedSemaphore
-from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -21,16 +19,15 @@ from .services.analysis import analyze, candidate_context, duplicate_candidates
 from .ml.embeddings import load_encoder
 from .ml.predict import ARTIFACTS, benchmark_forecast, load_text
 from .routers.media import router as media_router
+from .routers.recovery import router as recovery_router
 from .mfa import verify_once
 from .privacy import redact_input, redact_contact
-from .security import COOKIE, RequestProtection, configure_limit_store, get_session, issue_session, limits, session_digest, throttle
+from .security import COOKIE, RequestProtection, configure_limit_store, get_session, guarded_password_operation, hasher, issue_session, limits, session_digest, throttle
 from .ml.integrity import verify_artifacts
 
 encoder = None
 text_model = None
-hasher = PasswordHasher()
 dummy_hash = hasher.hash(secrets.token_urlsafe(32))
-password_slots = BoundedSemaphore(2)
 
 @asynccontextmanager
 async def lifespan(app):
@@ -50,6 +47,7 @@ app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS,
                    allow_credentials=True)
 app.add_middleware(RequestProtection)
 app.include_router(media_router)
+app.include_router(recovery_router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, error):
@@ -88,14 +86,6 @@ def closure_benchmark(category: str, occurred_at: datetime):
         raise HTTPException(404, "Benchmark unavailable for this category")
     return result
 
-def guarded_password_operation(function, *args):
-    if not password_slots.acquire(blocking=False):
-        raise HTTPException(429, "Authentication is busy. Please try again.")
-    try:
-        return function(*args)
-    finally:
-        password_slots.release()
-
 @app.post("/api/auth/register")
 def register(data: Credentials, request: Request, db=Depends(get_db)):
     throttle(request, "register", 3)
@@ -112,11 +102,15 @@ def login(data: Login, request: Request, response: Response, db=Depends(get_db))
     throttle(request, "login", 5)
     throttle(request, "login-account", 8, identity=data.email)
     user = db.scalar(select(User).where(User.email == data.email))
+    verified_hash = user.password_hash if user else dummy_hash
     try:
-        guarded_password_operation(hasher.verify, user.password_hash if user else dummy_hash, data.password)
+        guarded_password_operation(hasher.verify, verified_hash, data.password)
     except VerificationError:
         raise HTTPException(401, "Invalid email, password or authenticator code")
     if not user:
+        raise HTTPException(401, "Invalid email, password or authenticator code")
+    user = db.get(User, user.id, with_for_update=True, populate_existing=True)
+    if not user or user.password_hash != verified_hash:
         raise HTTPException(401, "Invalid email, password or authenticator code")
     verified = False
     if user.role == "admin":

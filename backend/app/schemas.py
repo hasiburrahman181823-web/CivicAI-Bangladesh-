@@ -4,9 +4,8 @@ from datetime import datetime, timezone
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-class Credentials(BaseModel):
+class AccountEmail(BaseModel):
     email: str = Field(min_length=5, max_length=254)
-    password: str = Field(min_length=10, max_length=128)
 
     @field_validator('email')
     @classmethod
@@ -15,8 +14,25 @@ class Credentials(BaseModel):
             raise ValueError('Enter a valid email address')
         return value.lower().strip()
 
+class Credentials(AccountEmail):
+    password: str = Field(min_length=10, max_length=128)
+
 class Login(Credentials):
     otp: str | None = Field(default=None,max_length=6)
+
+class RecoveryCodeRequest(BaseModel):
+    password: str = Field(min_length=10, max_length=128)
+
+class PasswordReset(BaseModel):
+    code: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+    password: str = Field(min_length=10, max_length=128)
+
+class AdminSetupProof(BaseModel):
+    code: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+
+class AdminSetup(AdminSetupProof):
+    password: str = Field(min_length=12, max_length=128)
+    otp: str = Field(pattern=r"^[0-9]{6}$")
 
 class TrackingInput(BaseModel):
     tracking_key: str = Field(min_length=1,max_length=128)

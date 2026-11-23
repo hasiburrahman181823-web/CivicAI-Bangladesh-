@@ -7,9 +7,10 @@ import anyio
 import jwt
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from urllib.parse import urlsplit
 
+from argon2 import PasswordHasher
 from fastapi import HTTPException, Request
 from sqlalchemy import delete
 from starlette.datastructures import Headers, MutableHeaders
@@ -24,6 +25,17 @@ SESSION_AUDIENCE = "civicai-web"
 limits = OrderedDict()
 limit_lock = Lock()
 redis_client = None
+hasher = PasswordHasher()
+password_slots = BoundedSemaphore(2)
+
+
+def guarded_password_operation(function, *args):
+    if not password_slots.acquire(blocking=False):
+        raise HTTPException(429, "Authentication is busy. Please try again.")
+    try:
+        return function(*args)
+    finally:
+        password_slots.release()
 
 def configure_limit_store():
     global redis_client

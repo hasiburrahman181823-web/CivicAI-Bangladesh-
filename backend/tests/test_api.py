@@ -6,8 +6,9 @@ from datetime import datetime, timezone, timedelta
 os.environ['DATABASE_URL'] = 'sqlite:///' + str(Path(tempfile.mkdtemp()) / 'test.db')
 from fastapi.testclient import TestClient
 from backend.app.main import app, limits, hasher
-from backend.app.db import SessionLocal
+from backend.app.db import Base, SessionLocal, get_db
 from backend.app.models import User
+from backend.app.routers import recovery
 from backend.app.security import JWT_SECRET, SESSION_AUDIENCE, SESSION_ISSUER
 
 def payload(**changes):
@@ -130,6 +131,93 @@ def test_multilingual_triage_preview_returns_explanation():
             assert result['score'] == min(100, sum(step['points'] for step in result['breakdown']))
             assert result['requires_review'] is True
             assert 'tracking_key' not in result
+
+
+def test_saved_recovery_code_is_single_use_and_revokes_sessions():
+    limits.clear()
+    account = {'email': 'backup-recovery@example.org', 'password': 'original-password-123'}
+    new_password = 'replacement-password-456'
+    with TestClient(app) as client:
+        assert client.post('/api/auth/recovery/code', json={'password': account['password']}).status_code == 401
+        assert client.post('/api/auth/register', json=account).status_code == 200
+        assert client.post('/api/auth/login', json=account).status_code == 200
+        old_session = client.cookies.get('civicai_session')
+        assert client.post('/api/auth/recovery/code', json={'password': 'wrong-password-456'}).status_code == 401
+        first = client.post('/api/auth/recovery/code', json={'password': account['password']}).json()['code']
+        second = client.post('/api/auth/recovery/code', json={'password': account['password']}).json()['code']
+        assert client.post('/api/auth/recovery/reset', json={'code': first, 'password': new_password}).status_code == 400
+        assert client.post('/api/auth/recovery/reset', json={'code': second, 'password': new_password}).status_code == 200
+        assert client.post('/api/auth/recovery/reset', json={'code': second, 'password': 'another-password-789'}).status_code == 400
+        assert client.get('/api/auth/me', headers={'Cookie': 'civicai_session=' + old_session}).status_code == 401
+        assert client.post('/api/auth/login', json=account).status_code == 401
+        assert client.post('/api/auth/login', json={**account, 'password': new_password}).status_code == 200
+
+
+def test_email_recovery_has_generic_response_and_expires(monkeypatch):
+    from sqlalchemy import select
+    from backend.app.models import PasswordRecoveryGrant
+
+    limits.clear()
+    delivered = []
+    monkeypatch.setattr(recovery, 'mail_settings', lambda: ('test-key', 'test@example.org', 'https://example.org'))
+    monkeypatch.setattr(recovery, 'send_recovery_email', lambda settings, email, code: delivered.append((email, code)))
+    account = {'email': 'mail-recovery@example.org', 'password': 'mail-password-123'}
+    with TestClient(app) as client:
+        assert client.post('/api/auth/register', json=account).status_code == 200
+        result = client.post('/api/auth/recovery/email', json={'email': account['email']})
+        other = client.post('/api/auth/recovery/email', json={'email': 'unknown-email@example.org'})
+        assert result.status_code == other.status_code == 202 and result.json() == other.json()
+        assert len(delivered) == 1 and delivered[0][0] == account['email']
+        code = delivered[0][1]
+        with SessionLocal() as db:
+            grant = db.scalar(select(PasswordRecoveryGrant).where(PasswordRecoveryGrant.digest == recovery.digest(code)))
+            assert grant.digest != code and grant.method == 'email'
+            grant.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+        assert client.post('/api/auth/recovery/reset', json={'code': code, 'password': 'changed-password-456'}).status_code == 400
+        assert client.post('/api/auth/recovery/email', json={'email': account['email']}).status_code == 202
+        assert len(delivered) == 2
+        assert client.post('/api/auth/recovery/reset', json={'code': delivered[1][1], 'password': 'changed-password-456'}).status_code == 200
+
+
+def test_first_admin_setup_requires_operator_code_and_mfa(monkeypatch, tmp_path):
+    from cryptography.fernet import Fernet
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    limits.clear()
+    owner = 'setup-owner@example.org'
+    setup_code = 'a' * 43
+    monkeypatch.setenv('CIVICAI_ADMIN_EMAIL', owner)
+    monkeypatch.setenv('CIVICAI_ADMIN_SETUP_CODE', setup_code)
+    monkeypatch.setenv('CIVICAI_ADMIN_SETUP_EXPIRES', (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
+    monkeypatch.setattr(recovery.mfa, 'ADMIN_MFA_KEY', Fernet.generate_key().decode())
+    monkeypatch.setattr(recovery.mfa, 'matching_counter', lambda secret, otp: {'123456': 10, '654321': 11}.get(otp))
+    engine = create_engine('sqlite:///' + str(tmp_path / 'admin-setup.db'))
+    Base.metadata.create_all(engine)
+
+    def isolated_db():
+        with Session(engine) as db:
+            yield db
+
+    monkeypatch.setitem(app.dependency_overrides, get_db, isolated_db)
+    try:
+        with TestClient(app) as client:
+            assert client.post('/api/auth/admin-setup/challenge', json={'code': 'b' * 43}).status_code == 400
+            challenge = client.post('/api/auth/admin-setup/challenge', json={'code': setup_code})
+            assert challenge.status_code == 200 and challenge.json()['email'] == owner
+            credentials = {'code': setup_code, 'password': 'unique-admin-password-123'}
+            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'otp': '000000'}).status_code == 400
+            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'otp': '123456'}).status_code == 200
+            assert client.post('/api/auth/admin-setup/challenge', json={'code': setup_code}).status_code == 409
+            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'otp': '654321'}).status_code == 409
+            account = {'email': owner, 'password': credentials['password']}
+            assert client.post('/api/auth/login', json={**account, 'otp': '123456'}).status_code == 401
+            assert client.post('/api/auth/login', json={**account, 'otp': '654321'}).status_code == 200
+            assert client.get('/api/admin/complaints').status_code == 200
+            assert client.post('/api/auth/recovery/code', json={'password': account['password']}).status_code == 403
+    finally:
+        engine.dispose()
 
 def test_authenticator_replay_for_enrolled_admin(monkeypatch):
     import base64

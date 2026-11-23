@@ -53,3 +53,11 @@ class AdminMFA(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
     secret_encrypted: Mapped[str] = mapped_column(Text)
     last_counter: Mapped[int] = mapped_column(default=-1)
+
+
+class PasswordRecoveryGrant(Base):
+    __tablename__ = "password_recovery_grants"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    method: Mapped[str] = mapped_column(String(16), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)

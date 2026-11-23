@@ -195,6 +195,10 @@ body { margin: 0; }
 .citizen-profile-list small { display: block; margin-top: 3px; }
 .citizen-profile-list span { color: var(--brand); font-size: 13px; font-weight: 700; }
 .citizen-admin-link { display: flex; width: fit-content; margin-top: 12px; }
+.citizen-recovery-code { margin-top: 18px; }
+.citizen-recovery-code > p, .citizen-secret-value p { margin: 8px 0; }
+.citizen-secret-value { margin-block: 10px; padding: 10px 12px; background: var(--tint); border-radius: 8px; }
+.citizen-secret-value code { display: block; font-family: ui-monospace, monospace; overflow-wrap: anywhere; user-select: all; }
 .citizen-optional > small { color: var(--muted); display: block; margin-top: 9px; }
 .citizen-shell .citizen-triage { padding: 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--tint); animation: citizen-appear .2s ease-out; }
 .citizen-receipt .citizen-triage { margin-top: 16px; }

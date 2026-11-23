@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import {request} from '../api/client';
 import {MediaTools} from '../components/ModelTools';
+import {FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
 import {copy} from './copy';
 import {translateWorkspace, WorkspaceLanguage} from '../workspaceLanguage';
 import './portal.css';
@@ -51,6 +52,7 @@ export function CitizenPortal() {
   const [account, setAccount] = useState(false);
   const [checkingSession, setCheckingSession] = useState(!isPreview);
   const [models, setModels] = useState(null);
+  const [recovery, setRecovery] = useState(null);
   const [accountError, setAccountError] = useState(null);
   const [trackingReceipt, setTrackingReceipt] = useState(null);
   const trackHeading = useRef(null);
@@ -60,6 +62,8 @@ export function CitizenPortal() {
   const tracking = route === '#track';
   const profile = !isPreview && route === '#profile';
   const admin = !isPreview && route === '#admin';
+  const recovering = !isPreview && (route === '#forgot-password' || route === '#reset-password' || route.startsWith('#reset-password/'));
+  const settingUpAdmin = !isPreview && route === '#admin-setup';
   const workspaceOpen = (admin && session?.role === 'admin') || (isPreview && route === '#admin-preview');
   const languageControl = <LanguageSwitcher language={language} onChange={setLanguage} label={t.language}/>;
   const workspaceLanguage = {language, t: (message, values) => translateWorkspace(language, message, values)};
@@ -68,6 +72,9 @@ export function CitizenPortal() {
     let active = true;
     if (!isPreview) {
       request('/health').then(value => { if (active) setModels(value); }).catch(() => {});
+      request('/auth/recovery/options')
+        .then(value => { if (active) setRecovery(value); })
+        .catch(() => { if (active) setRecovery({email_recovery: false, admin_setup: false}); });
       request('/auth/me')
         .then(value => { if (active) setSession(value); })
         .catch(error => { if (active && error.status !== 401) setAccountError(error); })
@@ -128,7 +135,7 @@ export function CitizenPortal() {
         <div className="citizen-container citizen-header-inner">
           <Brand t={t}/>
           <nav className="citizen-nav" aria-label={t.navigation}>
-            <a href="#home" aria-current={!tracking && !profile && !admin && route !== '#report' ? 'page' : undefined}>{t.home}</a>
+            <a href="#home" aria-current={!tracking && !profile && !admin && !recovering && !settingUpAdmin && route !== '#report' ? 'page' : undefined}>{t.home}</a>
             <a href="#report" aria-current={route === '#report' ? 'page' : undefined}>{t.report}</a>
             <a href="#track" aria-current={tracking ? 'page' : undefined}>{t.track}</a>
           </nav>
@@ -155,7 +162,7 @@ export function CitizenPortal() {
       {accountError && <p className="citizen-container citizen-error" role="alert">{errorCopy(t, accountError, 'auth')}</p>}
 
       <main className="citizen-main" id="content" tabIndex={-1}>
-        <div hidden={tracking || profile || admin}>
+        <div hidden={tracking || profile || admin || recovering || settingUpAdmin}>
           <section className="citizen-hero">
             <div className="citizen-container citizen-hero-inner">
               <div className="citizen-hero-copy">
@@ -193,6 +200,20 @@ export function CitizenPortal() {
             <TrackingForm t={t} receipt={trackingReceipt}/>
           </div>
         </section>}
+        {(recovering || settingUpAdmin) && <section className="citizen-container citizen-tracking">
+          <a className="citizen-back" href={settingUpAdmin ? '#admin' : '#home'}>
+            <ArrowLeft size={17} aria-hidden="true"/>{settingUpAdmin ? t.workspace : t.home}
+          </a>
+          <div className="citizen-card citizen-profile">
+            {settingUpAdmin
+              ? <FirstAdminSetup t={t} language={language} enabled={recovery ? recovery.admin_setup : null} onComplete={() => {
+                setSession(null);
+                setRecovery(current => current && {...current, admin_setup: false});
+              }}/>
+              : <PasswordRecovery key={route} t={t} language={language} route={route} emailAvailable={recovery?.email_recovery}
+                onReset={() => setSession(null)} onSignIn={() => setAccount(true)}/>}
+          </div>
+        </section>}
         {(profile || admin) && <section className="citizen-container citizen-tracking">
           <a className="citizen-back" href="#home"><ArrowLeft size={17} aria-hidden="true"/>{t.home}</a>
           <div className="citizen-card citizen-profile">
@@ -210,7 +231,13 @@ export function CitizenPortal() {
                 : session
                   ? <CitizenProfile key={session.email} t={t} language={language} session={session}
                     onSignOut={signOut} onExpired={() => setSession(null)}/>
-                  : <button className="citizen-button citizen-submit" type="button" onClick={() => setAccount(true)}>{t.signIn}</button>}
+                  : <div className="citizen-form">
+                    <button className="citizen-button citizen-submit" type="button" onClick={() => setAccount(true)}>{t.signIn}</button>
+                    <a className="citizen-text-button" href="#forgot-password">{recoveryLabel(language, 'forgot')}</a>
+                  </div>}
+            {admin && recovery?.admin_setup && <a className="citizen-text-button citizen-admin-link" href="#admin-setup">
+              {recoveryLabel(language, 'admin')}
+            </a>}
           </div>
         </section>}
       </main>
@@ -224,7 +251,7 @@ export function CitizenPortal() {
           </a>}
         </div>
       </footer>
-      {account && <AccountDialog t={t} onClose={() => setAccount(false)} onLogin={signedIn}/>}
+      {account && <AccountDialog t={t} language={language} onClose={() => setAccount(false)} onLogin={signedIn}/>}
     </div>
     {workspaceOpen && <WorkspaceLanguage.Provider value={workspaceLanguage}>
       <Suspense fallback={<p className="citizen-loading" role="status">{t.auth.wait}</p>}>
@@ -502,10 +529,11 @@ function CitizenProfile({t, language, session, onSignOut, onExpired}) {
         </ul>}
       <a className="citizen-text-button" href="#report">{t.report}<ArrowRight size={16} aria-hidden="true"/></a>
     </section>
+    {session.role === 'citizen' && <RecoveryCode t={t} language={language}/>}
   </>;
 }
 
-function AccountDialog({t, onClose, onLogin}) {
+function AccountDialog({t, language, onClose, onLogin}) {
   const dialog = useRef(null);
   useEffect(() => { dialog.current?.showModal(); }, []);
 
@@ -515,6 +543,9 @@ function AccountDialog({t, onClose, onLogin}) {
     </button>
     <span className="citizen-card-icon"><UserRound size={22} aria-hidden="true"/></span>
     <AccountForm t={t} onLogin={onLogin}/>
+    <a className="citizen-text-button citizen-admin-link" href="#forgot-password" onClick={() => dialog.current.close()}>
+      {recoveryLabel(language, 'forgot')}
+    </a>
     <a className="citizen-text-button citizen-admin-link" href="#admin" onClick={() => dialog.current.close()}>
       <ShieldCheck size={16} aria-hidden="true"/>{t.workspace}
     </a>

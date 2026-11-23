@@ -80,4 +80,12 @@ The [Render deployment](https://civicai-bangladesh-live-tivv.onrender.com/) uses
 
 The public form and private tracking page work without an account. Signed-in citizens can view their own submissions. Citizen login cookies expire after 60 minutes, and administrator sessions expire after 15 minutes and require MFA in production. The administrator dashboard filters the latest 500 loaded complaints by area and incident dates in Bangladesh time. The map displays incidents with optional coordinates and uses a Natural Earth boundary.
 
+### Account recovery and administrator setup
+
+Citizens can generate one single-use recovery code from their profile after confirming their current password. The **Forgot password?** page accepts that code. Resetting the password revokes all previous sessions and recovery grants for that account.
+
+For optional email recovery, configure a verified Resend sender, a sending-only `RESEND_API_KEY`, and `RECOVERY_FROM_EMAIL` on Render. Keep email click tracking off for password reset links. CivicAI uses the Render service's HTTPS URL by default. Set `RECOVERY_ORIGIN` when using a separate HTTPS public origin. If email delivery is not configured, the recovery page offers saved codes.
+
+The first administrator can activate the configured `CIVICAI_ADMIN_EMAIL` at `/#admin-setup` using the short-lived `CIVICAI_ADMIN_SETUP_CODE` held in the Render service's private environment. Set its absolute UTC deadline via `CIVICAI_ADMIN_SETUP_EXPIRES`. The operator enters a new password and confirms a code from their own authenticator. The page disables first-time enrollment once an administrator exists. The local `backend.scripts.create_admin` command remains available to authorized operators.
+
 Model output supports review. It does not represent an official or emergency service decision.
