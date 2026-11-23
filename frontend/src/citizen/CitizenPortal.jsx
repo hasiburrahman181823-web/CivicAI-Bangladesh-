@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {request} from '../api/client';
 import {MediaTools} from '../components/ModelTools';
-import {FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
+import {AuthenticatorCodeInput, FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
 import {copy} from './copy';
 import {translateWorkspace, WorkspaceLanguage} from '../workspaceLanguage';
 import './portal.css';
@@ -592,9 +592,7 @@ function AccountForm({t, admin = false, onLogin}) {
         <input key={register} name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={10} maxLength={128} required disabled={busy}/>
         {register && <small>{t.auth.passwordHint}</small>}
       </label>
-      {admin && <label>{t.auth.otp}
-        <input name="otp" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" maxLength={6} required disabled={busy}/>
-      </label>}
+      {admin && <AuthenticatorCodeInput label={t.auth.otp} disabled={busy}/>}
       {created && <p role="status">{t.auth.created}</p>}
       {detail && <p className="citizen-error" role="alert">{errorCopy(t, detail, 'auth')}</p>}
       <button type="submit" className="citizen-button citizen-submit" disabled={busy}>{busy ? t.auth.wait : heading}<ArrowRight size={18} aria-hidden="true"/></button>
