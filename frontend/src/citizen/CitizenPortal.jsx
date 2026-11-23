@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import {request} from '../api/client';
 import {MediaTools} from '../components/ModelTools';
-import {AuthenticatorCodeInput, FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
+import {FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
 import {copy} from './copy';
 import {translateWorkspace, WorkspaceLanguage} from '../workspaceLanguage';
 import './portal.css';
@@ -22,8 +22,6 @@ function errorCopy(t, problem, context) {
   if (!problem.status || problem.status >= 500 || problem.status < 400) return t.serviceUnavailable;
   if (context === 'track') return t.trackMissing;
   if (context === 'auth') {
-    if (problem.message === 'Enter a current unused authenticator code') return t.auth.invalidOtp;
-    if (problem.message === 'Administrator enrollment is required') return t.auth.enrolmentRequired;
     if (problem.status === 422) return t.auth.invalidFields;
     return t.auth.failed;
   }
@@ -569,7 +567,7 @@ function AccountForm({t, admin = false, onLogin}) {
     try {
       const account = await request(register ? '/auth/register' : '/auth/login', {
         method: 'POST',
-        body: JSON.stringify(register ? credentials : {...credentials, otp: fields.get('otp') || null}),
+        body: JSON.stringify(credentials),
       });
       if (register) {
         setRegister(false);
@@ -592,7 +590,6 @@ function AccountForm({t, admin = false, onLogin}) {
         <input key={register} name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={10} maxLength={128} required disabled={busy}/>
         {register && <small>{t.auth.passwordHint}</small>}
       </label>
-      {admin && <AuthenticatorCodeInput label={t.auth.otp} disabled={busy}/>}
       {created && <p role="status">{t.auth.created}</p>}
       {detail && <p className="citizen-error" role="alert">{errorCopy(t, detail, 'auth')}</p>}
       <button type="submit" className="citizen-button citizen-submit" disabled={busy}>{busy ? t.auth.wait : heading}<ArrowRight size={18} aria-hidden="true"/></button>

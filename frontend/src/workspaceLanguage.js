@@ -206,7 +206,6 @@ const bn = {
   'Password': 'পাসওয়ার্ড',
   'At least 10 characters': 'কমপক্ষে ১০ অক্ষর',
   'Toggle password visibility': 'পাসওয়ার্ড দেখান বা লুকান',
-  'Authenticator code for administrators': 'অ্যাডমিন অথেনটিকেটর কোড',
   '6 digits': '৬ সংখ্যা',
   'Please wait…': 'অপেক্ষা করুন…',
   'Create account': 'অ্যাকাউন্ট তৈরি করুন',

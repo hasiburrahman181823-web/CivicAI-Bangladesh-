@@ -13,14 +13,13 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import ALLOWED_HOSTS, CORS_ORIGINS, PRODUCTION
 from .db import Base, engine, get_db
-from .models import AdminMFA, Audit, Complaint, LoginSession, User
-from .schemas import Credentials, Login, ComplaintInput, ReviewInput, TrackingInput
+from .models import Audit, Complaint, LoginSession, User
+from .schemas import Credentials, ComplaintInput, ReviewInput, TrackingInput
 from .services.analysis import analyze, candidate_context, duplicate_candidates
 from .ml.embeddings import load_encoder
 from .ml.predict import ARTIFACTS, benchmark_forecast, load_text
 from .routers.media import router as media_router
 from .routers.recovery import router as recovery_router
-from .mfa import verify_once
 from .privacy import redact_input, redact_contact
 from .security import COOKIE, RequestProtection, configure_limit_store, get_session, guarded_password_operation, hasher, issue_session, limits, session_digest, throttle
 from .ml.integrity import verify_artifacts
@@ -65,9 +64,9 @@ def current_user(request: Request, db=Depends(get_db)):
     return get_session(request, db)[0]
 
 def admin(request: Request, db=Depends(get_db)):
-    user, session = get_session(request, db)
-    if user.role != "admin" or (PRODUCTION and not session.mfa_verified):
-        raise HTTPException(403, "Administrator access requires MFA")
+    user, _ = get_session(request, db)
+    if user.role != "admin":
+        raise HTTPException(403, "Administrator access required")
     return user
 
 def serialize(item):
@@ -98,7 +97,7 @@ def register(data: Credentials, request: Request, db=Depends(get_db)):
     return {"message": "You can sign in with your account details."}
 
 @app.post("/api/auth/login")
-def login(data: Login, request: Request, response: Response, db=Depends(get_db)):
+def login(data: Credentials, request: Request, response: Response, db=Depends(get_db)):
     throttle(request, "login", 5)
     throttle(request, "login-account", 8, identity=data.email)
     user = db.scalar(select(User).where(User.email == data.email))
@@ -106,22 +105,13 @@ def login(data: Login, request: Request, response: Response, db=Depends(get_db))
     try:
         guarded_password_operation(hasher.verify, verified_hash, data.password)
     except VerificationError:
-        raise HTTPException(401, "Invalid email, password or authenticator code")
+        raise HTTPException(401, "Invalid email or password")
     if not user:
-        raise HTTPException(401, "Invalid email, password or authenticator code")
+        raise HTTPException(401, "Invalid email or password")
     user = db.get(User, user.id, with_for_update=True, populate_existing=True)
     if not user or user.password_hash != verified_hash:
-        raise HTTPException(401, "Invalid email, password or authenticator code")
-    verified = False
-    if user.role == "admin":
-        enrollment = db.get(AdminMFA, user.id)
-        if enrollment:
-            verified = verify_once(db, enrollment, data.otp)
-            if not verified:
-                raise HTTPException(401, "Enter a current unused authenticator code")
-        elif PRODUCTION:
-            raise HTTPException(403, "Administrator enrollment is required")
-    issue_session(db,user,response,verified,request.cookies.get(COOKIE))
+        raise HTTPException(401, "Invalid email or password")
+    issue_session(db, user, response, prior_token=request.cookies.get(COOKIE))
     return {"role":user.role,"email":user.email}
 
 @app.get("/api/auth/me")

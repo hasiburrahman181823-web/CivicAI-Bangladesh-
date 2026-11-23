@@ -15,17 +15,14 @@ PRODUCTION = ENVIRONMENT.strip().lower() == "production"
 if PRODUCTION and (len(JWT_SECRET) < 32 or not os.getenv("JWT_SECRET")):
     raise RuntimeError("Production requires an explicit JWT_SECRET.")
 REDIS_URL = os.getenv("REDIS_URL", "")
-ADMIN_MFA_KEY = os.getenv("ADMIN_MFA_KEY", "")
 ALLOWED_HOSTS = [name.strip() for name in os.getenv(
     "ALLOWED_HOSTS", "localhost,127.0.0.1,testserver" if not PRODUCTION else ""
 ).split(",") if name.strip()]
 CORS_ORIGINS = [x.strip() for x in CORS_ORIGINS if x.strip()]
 if PRODUCTION:
-    from cryptography.fernet import Fernet
     if not ALLOWED_HOSTS or any("*" in host or "/" in host for host in ALLOWED_HOSTS):
         raise RuntimeError("Set exact ALLOWED_HOSTS for production.")
     if any(not origin.startswith("https://") for origin in CORS_ORIGINS):
         raise RuntimeError("Use HTTPS origins or empty CORS_ORIGINS in production.")
     if not REDIS_URL:
         raise RuntimeError("Set REDIS_URL for shared rate controls in production.")
-    Fernet(ADMIN_MFA_KEY.encode())

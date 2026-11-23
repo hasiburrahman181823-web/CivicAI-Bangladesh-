@@ -1,0 +1,39 @@
+services:
+  civicai:
+    build: .
+    ports:
+      - '127.0.0.1:8000:8000'
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/civicai.db}
+      ENVIRONMENT: production
+      JWT_SECRET: ${JWT_SECRET:?Set a unique rate-key secret}
+      CIVICAI_MODEL_MANIFEST_SHA256: ${CIVICAI_MODEL_MANIFEST_SHA256:?Set the trusted release digest}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set exact frontend hostnames}
+      CORS_ORIGINS: ""
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - civic_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,nosuid,noexec
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 192
+    restart: unless-stopped
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server","--save","","--appendonly","no","--maxmemory","64mb","--maxmemory-policy","noeviction"]
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 6
+    networks: [default]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+volumes:
+  civic_data:

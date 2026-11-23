@@ -17,8 +17,7 @@ class AccountEmail(BaseModel):
 class Credentials(AccountEmail):
     password: str = Field(min_length=10, max_length=128)
 
-class Login(Credentials):
-    otp: str | None = Field(default=None,max_length=6)
+ADMIN_PASSWORD_MINIMUM = 15
 
 class RecoveryCodeRequest(BaseModel):
     password: str = Field(min_length=10, max_length=128)
@@ -31,8 +30,7 @@ class AdminSetupProof(BaseModel):
     code: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
 
 class AdminSetup(AdminSetupProof):
-    password: str = Field(min_length=12, max_length=128)
-    otp: str = Field(pattern=r"^[0-9]{6}$")
+    password: str = Field(min_length=ADMIN_PASSWORD_MINIMUM, max_length=128)
 
 class TrackingInput(BaseModel):
     tracking_key: str = Field(min_length=1,max_length=128)

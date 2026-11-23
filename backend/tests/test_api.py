@@ -180,8 +180,7 @@ def test_email_recovery_has_generic_response_and_expires(monkeypatch):
         assert client.post('/api/auth/recovery/reset', json={'code': delivered[1][1], 'password': 'changed-password-456'}).status_code == 200
 
 
-def test_first_admin_setup_requires_operator_code_and_mfa(monkeypatch, tmp_path):
-    from cryptography.fernet import Fernet
+def test_first_admin_setup_requires_operator_code_and_allows_password_sign_in(monkeypatch, tmp_path):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
 
@@ -191,8 +190,6 @@ def test_first_admin_setup_requires_operator_code_and_mfa(monkeypatch, tmp_path)
     monkeypatch.setenv('CIVICAI_ADMIN_EMAIL', owner)
     monkeypatch.setenv('CIVICAI_ADMIN_SETUP_CODE', setup_code)
     monkeypatch.setenv('CIVICAI_ADMIN_SETUP_EXPIRES', (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat())
-    monkeypatch.setattr(recovery.mfa, 'ADMIN_MFA_KEY', Fernet.generate_key().decode())
-    monkeypatch.setattr(recovery.mfa, 'matching_counter', lambda secret, otp: {'123456': 10, '654321': 11}.get(otp))
     engine = create_engine('sqlite:///' + str(tmp_path / 'admin-setup.db'))
     Base.metadata.create_all(engine)
 
@@ -205,38 +202,35 @@ def test_first_admin_setup_requires_operator_code_and_mfa(monkeypatch, tmp_path)
         with TestClient(app) as client:
             assert client.post('/api/auth/admin-setup/challenge', json={'code': 'b' * 43}).status_code == 400
             challenge = client.post('/api/auth/admin-setup/challenge', json={'code': setup_code})
-            assert challenge.status_code == 200 and challenge.json()['email'] == owner
+            assert challenge.status_code == 200 and challenge.json() == {'email': owner}
             credentials = {'code': setup_code, 'password': 'unique-admin-password-123'}
-            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'otp': '000000'}).status_code == 400
-            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'otp': '123456'}).status_code == 200
+            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'code': 'b' * 43}).status_code == 400
+            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'password': 'too-short-123'}).status_code == 422
+            assert client.post('/api/auth/admin-setup/complete', json=credentials).status_code == 200
             assert client.post('/api/auth/admin-setup/challenge', json={'code': setup_code}).status_code == 409
-            assert client.post('/api/auth/admin-setup/complete', json={**credentials, 'otp': '654321'}).status_code == 409
+            assert client.post('/api/auth/admin-setup/complete', json=credentials).status_code == 409
             account = {'email': owner, 'password': credentials['password']}
-            assert client.post('/api/auth/login', json={**account, 'otp': '123456'}).status_code == 401
-            assert client.post('/api/auth/login', json={**account, 'otp': '654321'}).status_code == 200
+            assert client.post('/api/auth/login', json={**account, 'password': 'wrong-admin-password'}).status_code == 401
+            login = client.post('/api/auth/login', json=account)
+            assert login.status_code == 200 and login.json()['role'] == 'admin'
+            assert 'Max-Age=900' in login.headers['set-cookie']
             assert client.get('/api/admin/complaints').status_code == 200
             assert client.post('/api/auth/recovery/code', json={'password': account['password']}).status_code == 403
     finally:
         engine.dispose()
 
-def test_authenticator_replay_for_enrolled_admin(monkeypatch):
-    import base64
-    from cryptography.fernet import Fernet
-    from backend.app import mfa
+def test_previously_enrolled_admin_can_sign_in_with_existing_password():
     from backend.app.models import AdminMFA
     limits.clear()
-    monkeypatch.setattr(mfa,'ADMIN_MFA_KEY',Fernet.generate_key().decode())
-    monkeypatch.setattr(mfa.time,'time',lambda: 59)
-    secret=base64.b32encode(b'12345678901234567890').decode()
     with TestClient(app) as client:
         with SessionLocal() as db:
             user=User(email='mfa@example.org',password_hash=hasher.hash('mfa-admin-pass'),role='admin')
             db.add(user)
             db.flush()
-            db.add(AdminMFA(user_id=user.id,secret_encrypted=mfa.encrypt_secret(secret)))
+            db.add(AdminMFA(user_id=user.id,secret_encrypted='legacy enrollment record'))
             db.commit()
         args={'email':'mfa@example.org','password':'mfa-admin-pass'}
-        assert client.post('/api/auth/login',json=args).status_code==401
-        assert client.post('/api/auth/login',json={**args,'otp':'287082'}).status_code==200
+        assert client.post('/api/auth/login',json=args).status_code==200
+        assert client.get('/api/admin/complaints').status_code == 200
         assert client.post('/api/auth/logout').status_code==200
-        assert client.post('/api/auth/login',json={**args,'otp':'287082'}).status_code==401
+        assert client.get('/api/admin/complaints').status_code == 401

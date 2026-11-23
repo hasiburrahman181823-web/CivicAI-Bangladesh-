@@ -19,12 +19,10 @@ const wording = {
     wrongPassword: 'বর্তমান পাসওয়ার্ডটি যাচাই করুন।',
     admin: 'প্রথম অ্যাডমিন সেটআপ', setupIntro: 'Render-এ সংরক্ষিত একবার ব্যবহারযোগ্য অ্যাডমিন সেটআপ কোডটি দিন।',
     setupCode: 'অ্যাডমিন সেটআপ কোড', continue: 'সেটআপ চালিয়ে যান', setupOff: 'অ্যাডমিন সেটআপ এখন বন্ধ আছে অথবা কোডটির মেয়াদ শেষ হয়েছে।',
-    authenticator: 'অথেনটিকেটর অ্যাপে Time based অ্যাকাউন্ট যোগ করে নিচের কী দিন। তারপর CivicAI Bangladesh-এর কোড ব্যবহার করুন।',
-    activate: 'অ্যাডমিন অ্যাকাউন্ট চালু করুন', setupDone: 'অ্যাডমিন অ্যাকাউন্ট চালু হয়েছে। অ্যাপে পরের ৬ সংখ্যার কোড এলে সাইন ইন করুন।',
+    activate: 'অ্যাডমিন অ্যাকাউন্ট চালু করুন', setupDone: 'অ্যাডমিন অ্যাকাউন্ট চালু হয়েছে। ইমেইল ও নতুন পাসওয়ার্ড দিয়ে সাইন ইন করুন।',
     badSetup: 'অ্যাডমিন সেটআপ কোডটি ভুল অথবা মেয়াদ শেষ হয়েছে।',
-    invalidOtp: 'কোডটি মেলেনি। অ্যাপে CivicAI Bangladesh-এর নতুন কোড এলে সেটি দিন। সমস্যাটি থাকলে সেটআপ কী ও ফোনের স্বয়ংক্রিয় সময় যাচাই করুন।',
     alreadySetup: 'এই সাইটে ইতিমধ্যে একটি অ্যাডমিন অ্যাকাউন্ট চালু আছে।',
-    adminPasswordHint: 'অন্তত ১২ অক্ষরের একটি নতুন, আলাদা পাসওয়ার্ড দিন।',
+    adminPasswordHint: 'অন্তত ১৫ অক্ষরের একটি নতুন, আলাদা পাসওয়ার্ড দিন।',
   },
   en: {
     forgot: 'Forgot password?', emailIntro: 'Request a reset link at the email address for your account.',
@@ -41,27 +39,15 @@ const wording = {
     wrongPassword: 'Check your current password.',
     admin: 'Set up the first administrator', setupIntro: 'Enter the one-time administrator setup code stored in Render.',
     setupCode: 'Administrator setup code', continue: 'Continue setup', setupOff: 'Administrator setup is disabled or the code has expired.',
-    authenticator: 'Add a time-based account in your authenticator app using the key below. Then use the code for CivicAI Bangladesh.',
-    activate: 'Activate administrator account', setupDone: 'Administrator activated. Sign in with the next 6-digit code shown by your app.',
+    activate: 'Activate administrator account', setupDone: 'Administrator activated. Sign in with your email and new password.',
     badSetup: 'The administrator setup code is invalid or has expired.',
-    invalidOtp: 'The code did not match. Try the next code for CivicAI Bangladesh. If it still fails, check the setup key and your phone’s automatic time.',
     alreadySetup: 'An administrator is already set up for this site.',
-    adminPasswordHint: 'Use a new, unique password of at least 12 characters.',
+    adminPasswordHint: 'Use a new, unique password of at least 15 characters.',
   },
 };
 
 export function recoveryLabel(language, key) {
   return wording[language][key];
-}
-
-export function AuthenticatorCodeInput({label, disabled}) {
-  return <label>{label}
-    <input name="otp" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" dir="ltr" required disabled={disabled}
-      onChange={event => {
-        const input = event.currentTarget;
-        input.value = input.value.replace(/[০-৯]/g, digit => String(digit.charCodeAt(0) - 0x09e6)).replace(/\s/g, '');
-      }}/>
-  </label>;
 }
 
 function submit(path, body) {
@@ -72,12 +58,11 @@ function message(t, labels, problem, field) {
   if (problem.status === 429) return t.rateLimited;
   if (!problem.status || problem.status >= 500) return t.serviceUnavailable;
   if (problem.status === 409) return labels.alreadySetup;
-  if (problem.message === 'Enter a current authenticator code') return labels.invalidOtp;
   return labels[field];
 }
 
 function NewPasswordFields({t, labels, admin = false, busy}) {
-  const minimum = admin ? 12 : 10;
+  const minimum = admin ? 15 : 10;
   return <>
     <label>{labels.password}
       <input name="password" type="password" autoComplete="new-password" minLength={minimum} maxLength={128} required disabled={busy}/>
@@ -222,7 +207,7 @@ export function FirstAdminSetup({t, language, enabled, onComplete}) {
         const data = await submit('admin-setup/challenge', {code});
         setChallenge({...data, code});
       } else {
-        await submit('admin-setup/complete', {code: challenge.code, password, otp: fields.get('otp')});
+        await submit('admin-setup/complete', {code: challenge.code, password});
         setChallenge(null);
         setDone(true);
         onComplete();
@@ -243,12 +228,7 @@ export function FirstAdminSetup({t, language, enabled, onComplete}) {
       : <form key={challenge ? 'confirm' : 'start'} className="citizen-form" onSubmit={handleSubmit}>
         {challenge ? <>
           <p>{t.auth.email} · {challenge.email}</p>
-          <div className="citizen-secret-value">
-            <p>{labels.authenticator}</p>
-            <code dir="ltr">{challenge.authenticator_key}</code>
-          </div>
           <NewPasswordFields t={t} labels={labels} admin busy={busy}/>
-          <AuthenticatorCodeInput label={t.auth.otp} disabled={busy}/>
         </> : <label>{labels.setupCode}
           <input name="code" type="password" pattern={codePattern} autoComplete="off" required disabled={busy} maxLength={43}/>
         </label>}

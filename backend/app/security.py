@@ -76,7 +76,7 @@ def throttle(request: Request, action: str, maximum: int, identity: str | None =
 def session_digest(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
-def issue_session(db, user, response, mfa_verified, prior_token=None):
+def issue_session(db, user, response, prior_token=None):
     seconds = 900 if user.role == "admin" else 3600
     now = datetime.now(timezone.utc).replace(microsecond=0)
     expires_at = now + timedelta(seconds=seconds)
@@ -89,8 +89,7 @@ def issue_session(db, user, response, mfa_verified, prior_token=None):
     db.execute(delete(LoginSession).where(LoginSession.expires_at <= now))
     if prior_token:
         db.execute(delete(LoginSession).where(LoginSession.digest == session_digest(prior_token)))
-    db.add(LoginSession(digest=session_digest(token), user_id=user.id,
-                        expires_at=expires_at, mfa_verified=mfa_verified))
+    db.add(LoginSession(digest=session_digest(token), user_id=user.id, expires_at=expires_at))
     db.commit()
     response.set_cookie(COOKIE, token, max_age=seconds, httponly=True, secure=PRODUCTION,
                         samesite="strict", path="/")

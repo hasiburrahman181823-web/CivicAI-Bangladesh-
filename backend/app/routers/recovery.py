@@ -1,5 +1,4 @@
 """Single-use citizen recovery and operator-authorized administrator setup."""
-import base64
 import hashlib
 import hmac
 import logging
@@ -14,10 +13,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from .. import mfa
 from ..config import PRODUCTION
 from ..db import SessionLocal, get_db
-from ..models import AdminMFA, LoginSession, PasswordRecoveryGrant, User
+from ..models import LoginSession, PasswordRecoveryGrant, User
 from ..schemas import AccountEmail, AdminSetup, AdminSetupProof, PasswordReset, RecoveryCodeRequest
 from ..security import COOKIE, get_session, guarded_password_operation, hasher, throttle
 
@@ -55,7 +53,7 @@ def admin_setup_settings():
         expires = datetime.fromisoformat(os.getenv("CIVICAI_ADMIN_SETUP_EXPIRES", ""))
     except ValueError:
         return None
-    if owner and len(code) == 43 and code.isascii() and mfa.ADMIN_MFA_KEY and expires.tzinfo:
+    if owner and len(code) == 43 and code.isascii() and expires.tzinfo:
         if expires > datetime.now(timezone.utc):
             return owner, code
     return None
@@ -185,12 +183,6 @@ def setup_email(code):
     return settings[0]
 
 
-def setup_totp_secret(email, code):
-    key = mfa.ADMIN_MFA_KEY.encode("ascii")
-    derived = hmac.digest(key, f"civicai:admin-enrollment:{email}:{code}".encode(), "sha256")
-    return base64.b32encode(derived[:20]).decode("ascii")
-
-
 def require_first_administrator(db):
     if db.scalar(select(User.id).where(User.role == "admin").limit(1)) is not None:
         raise HTTPException(409, "An administrator is already set up")
@@ -201,17 +193,13 @@ def admin_setup_challenge(data: AdminSetupProof, request: Request, db=Depends(ge
     throttle(request, "admin-setup-challenge", 5)
     email = setup_email(data.code)
     require_first_administrator(db)
-    return {"email": email, "authenticator_key": setup_totp_secret(email, data.code)}
+    return {"email": email}
 
 
 @router.post("/admin-setup/complete")
 def complete_admin_setup(data: AdminSetup, request: Request, response: Response, db=Depends(get_db)):
     throttle(request, "admin-setup-complete", 5)
     email = setup_email(data.code)
-    secret = setup_totp_secret(email, data.code)
-    counter = mfa.matching_counter(secret, data.otp)
-    if counter is None:
-        raise HTTPException(400, "Enter a current authenticator code")
     user = db.scalar(select(User).where(User.email == email).with_for_update())
     require_first_administrator(db)
     password_hash = guarded_password_operation(hasher.hash, data.password)
@@ -223,8 +211,6 @@ def complete_admin_setup(data: AdminSetup, request: Request, response: Response,
         user.password_hash = password_hash
         revoke_account_secrets(db, user.id)
     try:
-        db.flush()
-        db.add(AdminMFA(user_id=user.id, secret_encrypted=mfa.encrypt_secret(secret), last_counter=counter))
         db.commit()
     except IntegrityError:
         db.rollback()
