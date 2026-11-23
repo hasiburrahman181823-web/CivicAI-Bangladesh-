@@ -142,7 +142,13 @@ def my_complaints(user=Depends(current_user), db=Depends(get_db)):
         .order_by(Complaint.created_at.desc(), Complaint.id.desc())
         .limit(100)
     )
-    return [dict(row) for row in db.execute(query).mappings()]
+    reports = []
+    for row in db.execute(query).mappings():
+        created_at = row["created_at"]
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        reports.append({**row, "created_at": created_at.astimezone(timezone.utc).isoformat()})
+    return reports
 
 @app.post("/api/auth/logout")
 def logout(request: Request, response: Response, db=Depends(get_db)):

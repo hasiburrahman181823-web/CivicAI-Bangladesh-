@@ -71,7 +71,7 @@ def test_profile_lists_only_signed_in_citizens_complaints():
         assert profile.headers['Cache-Control'] == 'no-store'
         assert profile.json() == [{
             'id': submitted['id'], 'title': submitted['title'], 'area': submitted['area'],
-            'status': submitted['status'], 'created_at': submitted['created_at'].removesuffix('Z'),
+            'status': submitted['status'], 'created_at': datetime.fromisoformat(submitted['created_at']).isoformat(),
         }]
         assert client.post('/api/auth/logout').status_code == 200
         assert client.get('/api/auth/me/complaints').status_code == 401
