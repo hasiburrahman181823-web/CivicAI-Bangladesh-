@@ -1,27 +1,36 @@
 services:
-  - type: web
-    name: civicai-backend
-    env: python
-    region: oregon
+  - type: keyvalue
+    name: civicai-bangladesh-rates
     plan: free
-    branch: main
-    buildCommand: "pip install -r backend/requirements.txt"
-    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
-    healthCheckPath: "/api/health"
+    region: oregon
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+  - type: web
+    name: civicai-bangladesh-live
+    runtime: docker
+    branch: civicai-bilingual-render
+    plan: free
+    region: oregon
+    healthCheckPath: /api/health
+    dockerfilePath: ./Dockerfile
+    dockerCommand: >-
+      sh -c 'export ALLOWED_HOSTS="${ALLOWED_HOSTS:-$RENDER_EXTERNAL_HOSTNAME}";
+      exec uvicorn backend.app.main:app --host 0.0.0.0 --port "$PORT" --workers 1
+      --no-server-header --no-proxy-headers --limit-concurrency 32
+      --timeout-keep-alive 5 --no-access-log'
     envVars:
       - key: ENVIRONMENT
         value: production
-      - key: DEBUG
-        value: "False"
-      - key: SECRET_KEY
-        generateValue: true
+      - key: CORS_ORIGINS
+        value: ""
       - key: DATABASE_URL
         sync: false
-      - key: CORS_ORIGINS
-        value: "https://civicai-bangladesh.vercel.app"
-      - key: CLOUDINARY_CLOUD_NAME
-        sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
-        sync: false
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: civicai-bangladesh-rates
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_MFA_KEY
+        generateValue: true

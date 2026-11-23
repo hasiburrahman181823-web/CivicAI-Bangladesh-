@@ -1,60 +1,18 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-.venv/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Node
 node_modules/
-frontend/node_modules/
-frontend/dist/
-frontend/.next/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Database & Uploads
-*.db
-*.sqlite3
-*.sqlite
-uploads/*
-!uploads/.gitkeep
-
-# Environment variables & secrets
+dist/
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+*.db
+*.db-*
+__pycache__/
+.pytest_cache/
+.venv/
+backend/ml_training/data/raw/
+backend/ml_training/artifacts/*
+!backend/ml_training/artifacts/.gitkeep
+*.joblib
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-Thumbs.db
-Desktop.ini
-.DS_Store
+*.sqlite*
+backend/ml_training/data/private/
+backend/ml_training/data/processed/
