@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, delete
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import ALLOWED_HOSTS, CORS_ORIGINS, PRODUCTION
 from .db import Base, engine, get_db
@@ -57,6 +57,10 @@ async def validation_error(request, error):
     details = [{"field":".".join(map(str,item["loc"])), "type":item["type"]}
                for item in error.errors()]
     return JSONResponse(status_code=422,content={"detail":"Check the submitted fields","fields":details})
+
+@app.exception_handler(OperationalError)
+async def database_unavailable(request, error):
+    return JSONResponse(status_code=503, content={"detail": "Database temporarily unavailable"})
 
 
 def current_user(request: Request, db=Depends(get_db)):
@@ -129,6 +133,16 @@ def login(data: Login, request: Request, response: Response, db=Depends(get_db))
 @app.get("/api/auth/me")
 def me(user=Depends(current_user)):
     return {"role":user.role,"email":user.email}
+
+@app.get("/api/auth/me/complaints")
+def my_complaints(user=Depends(current_user), db=Depends(get_db)):
+    query = (
+        select(Complaint.id, Complaint.title, Complaint.area, Complaint.status, Complaint.created_at)
+        .where(Complaint.owner_id == user.id)
+        .order_by(Complaint.created_at.desc(), Complaint.id.desc())
+        .limit(100)
+    )
+    return [dict(row) for row in db.execute(query).mappings()]
 
 @app.post("/api/auth/logout")
 def logout(request: Request, response: Response, db=Depends(get_db)):

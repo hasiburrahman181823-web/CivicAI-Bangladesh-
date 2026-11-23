@@ -162,6 +162,18 @@ body { margin: 0; }
 .citizen-tracking-result { padding: 16px; border: 1px solid var(--border); border-radius: 9px; background: #edf7ef; }
 .citizen-tracking-result p { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--muted); font-size: 14px; }
 .citizen-tracking-result h2 { font-size: 21px; color: var(--brand); }
+.citizen-profile .citizen-form { margin-top: 20px; }
+.citizen-profile-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.citizen-profile-actions dt, .citizen-profile-list small { color: var(--muted); font-size: 13px; }
+.citizen-profile-actions dd { margin: 3px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+.citizen-profile-complaints { margin-top: 18px; }
+.citizen-profile-complaints h2 { font-weight: 800; margin-bottom: 10px; }
+.citizen-profile-complaints p { margin-bottom: 12px; }
+.citizen-profile-list { margin-bottom: 14px; padding: 0; list-style: none; }
+.citizen-profile-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 12px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.citizen-profile-list small { display: block; margin-top: 3px; }
+.citizen-profile-list span { color: var(--brand); font-size: 13px; font-weight: 700; }
+.citizen-admin-link { display: flex; width: fit-content; margin-top: 12px; }
 .citizen-receipt dl { margin: 0 0 18px; display: grid; gap: 11px; }
 .citizen-receipt dt { font-size: 14px; font-weight: 700; }
 .citizen-receipt dd { margin: 5px 0 0; padding: 8px 10px; background: #f2f7f3; border-radius: 7px; overflow-wrap: anywhere; font-size: 13px; user-select: all; }

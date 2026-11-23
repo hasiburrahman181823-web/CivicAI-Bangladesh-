@@ -20,7 +20,12 @@ function errorCopy(t, problem, context) {
   if (problem.status === 429) return t.rateLimited;
   if (!problem.status || problem.status >= 500 || problem.status < 400) return t.serviceUnavailable;
   if (context === 'track') return t.trackMissing;
-  if (context === 'auth') return t.auth.failed;
+  if (context === 'auth') {
+    if (problem.message === 'Enter a current unused authenticator code') return t.auth.invalidOtp;
+    if (problem.message === 'Administrator enrollment is required') return t.auth.enrolmentRequired;
+    if (problem.status === 422) return t.auth.invalidFields;
+    return t.auth.failed;
+  }
   return t.invalidReport;
 }
 
@@ -43,7 +48,7 @@ export function CitizenPortal() {
   const [route, setRoute] = useState(() => window.location.hash);
   const [session, setSession] = useState(null);
   const [account, setAccount] = useState(false);
-  const [workspace, setWorkspace] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(!isPreview);
   const [accountError, setAccountError] = useState(null);
   const [trackingReceipt, setTrackingReceipt] = useState(null);
   const trackHeading = useRef(null);
@@ -51,15 +56,26 @@ export function CitizenPortal() {
   const homeHeading = useRef(null);
   const t = copy[language];
   const tracking = route === '#track';
-  const workspaceOpen = workspace || (isPreview && route === '#admin-preview');
+  const profile = !isPreview && route === '#profile';
+  const admin = !isPreview && route === '#admin';
+  const workspaceOpen = (admin && session?.role === 'admin') || (isPreview && route === '#admin-preview');
   const languageControl = <LanguageSwitcher language={language} onChange={setLanguage} label={t.language}/>;
   const workspaceLanguage = {language, t: (message, values) => translateWorkspace(language, message, values)};
 
   useEffect(() => {
-    if (!isPreview) request('/auth/me').then(setSession).catch(() => {});
+    let active = true;
+    if (!isPreview) {
+      request('/auth/me')
+        .then(value => { if (active) setSession(value); })
+        .catch(error => { if (active && error.status !== 401) setAccountError(error); })
+        .finally(() => { if (active) setCheckingSession(false); });
+    }
     function hashChanged() { setRoute(window.location.hash); }
     window.addEventListener('hashchange', hashChanged);
-    return () => window.removeEventListener('hashchange', hashChanged);
+    return () => {
+      active = false;
+      window.removeEventListener('hashchange', hashChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -84,6 +100,13 @@ export function CitizenPortal() {
     }
   }
 
+  function signedIn(value) {
+    setSession(value);
+    setAccount(false);
+    setAccountError(null);
+    if (!admin) window.location.hash = value.role === 'admin' ? 'admin' : 'profile';
+  }
+
   function trackReport(receipt) {
     setTrackingReceipt(receipt);
     window.location.hash = 'track';
@@ -96,15 +119,19 @@ export function CitizenPortal() {
         <div className="citizen-container citizen-header-inner">
           <Brand t={t}/>
           <nav className="citizen-nav" aria-label={t.navigation}>
-            <a href="#home" aria-current={!tracking && route !== '#report' ? 'page' : undefined}>{t.home}</a>
+            <a href="#home" aria-current={!tracking && !profile && !admin && route !== '#report' ? 'page' : undefined}>{t.home}</a>
             <a href="#report" aria-current={route === '#report' ? 'page' : undefined}>{t.report}</a>
             <a href="#track" aria-current={tracking ? 'page' : undefined}>{t.track}</a>
           </nav>
           <div className="citizen-actions">
             {languageControl}
-            <button type="button" className="citizen-account" disabled={isPreview} onClick={() => session ? signOut() : setAccount(true)}>
-              <UserRound size={17} aria-hidden="true"/><span>{session ? t.signOut : t.signIn}</span>
-            </button>
+            {session
+              ? <a className="citizen-account" href="#profile" aria-current={profile ? 'page' : undefined}>
+                <UserRound size={17} aria-hidden="true"/>{t.profile.title}
+              </a>
+              : <button type="button" className="citizen-account" disabled={isPreview || checkingSession} onClick={() => setAccount(true)}>
+                <UserRound size={17} aria-hidden="true"/>{t.signIn}
+              </button>}
           </div>
         </div>
       </header>
@@ -115,7 +142,7 @@ export function CitizenPortal() {
       {accountError && <p className="citizen-container citizen-error" role="alert">{errorCopy(t, accountError, 'auth')}</p>}
 
       <main className="citizen-main" id="content" tabIndex={-1}>
-        <div hidden={tracking}>
+        <div hidden={tracking || profile || admin}>
           <section className="citizen-hero">
             <div className="citizen-container citizen-hero-inner">
               <div className="citizen-hero-copy">
@@ -153,33 +180,43 @@ export function CitizenPortal() {
             <TrackingForm t={t} receipt={trackingReceipt}/>
           </div>
         </section>}
+        {(profile || admin) && <section className="citizen-container citizen-tracking">
+          <a className="citizen-back" href="#home"><ArrowLeft size={17} aria-hidden="true"/>{t.home}</a>
+          <div className="citizen-card citizen-profile">
+            <CardHeader Icon={admin ? ShieldCheck : UserRound} title={admin ? t.workspace : t.profile.title}
+              intro={admin ? t.auth.adminHelp : t.profile.intro} primaryHeading/>
+            {checkingSession
+              ? <p role="status">{t.auth.wait}</p>
+              : admin
+                ? session
+                  ? <div className="citizen-profile-actions">
+                    <p>{t.auth.adminOnly}</p>
+                    <button className="citizen-text-button" type="button" onClick={signOut}>{t.signOut}</button>
+                  </div>
+                  : <AccountForm t={t} admin onLogin={signedIn}/>
+                : session
+                  ? <CitizenProfile key={session.email} t={t} language={language} session={session}
+                    onSignOut={signOut} onExpired={() => setSession(null)}/>
+                  : <button className="citizen-button citizen-submit" type="button" onClick={() => setAccount(true)}>{t.signIn}</button>}
+          </div>
+        </section>}
       </main>
 
       <footer className="citizen-footer">
         <div className="citizen-container citizen-footer-inner">
           <Brand t={t}/>
           <p>{t.footer}</p>
-          {session?.role === 'admin' && <button type="button" className="citizen-text-button" onClick={() => setWorkspace(true)}>
-            {t.workspace}<ArrowRight size={16} aria-hidden="true"/>
-          </button>}
+          {!isPreview && <a className="citizen-text-button" href="#admin" aria-current={admin ? 'page' : undefined}>
+            <ShieldCheck size={16} aria-hidden="true"/>{t.workspace}
+          </a>}
         </div>
       </footer>
-      {account && <AccountDialog t={t} onClose={() => setAccount(false)} onLogin={value => {
-        setSession(value);
-        setAccount(false);
-        setAccountError(null);
-        if (value.role === 'admin') setWorkspace(true);
-      }}/>}
+      {account && <AccountDialog t={t} onClose={() => setAccount(false)} onLogin={signedIn}/>}
     </div>
     {workspaceOpen && <WorkspaceLanguage.Provider value={workspaceLanguage}>
       <Suspense fallback={<p className="citizen-loading" role="status">{t.auth.wait}</p>}>
-        <Workspace initialSession={session} languageControl={languageControl} preview={isPreview} onExit={() => {
-          setWorkspace(false);
-          if (isPreview) window.location.hash = 'home';
-        }} onLogout={() => {
-          setSession(null);
-          setWorkspace(false);
-        }}/>
+        <Workspace initialSession={session} languageControl={languageControl} preview={isPreview}
+          onExit={() => { window.location.hash = 'home'; }} onLogout={() => setSession(null)}/>
       </Suspense>
     </WorkspaceLanguage.Provider>}
   </>;
@@ -354,15 +391,76 @@ function TrackingForm({t, receipt}) {
   </form>;
 }
 
+function CitizenProfile({t, language, session, onSignOut, onExpired}) {
+  const [items, setItems] = useState(null);
+  const [error, setError] = useState(null);
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    request('/auth/me/complaints', {signal: controller.signal})
+      .then(items => { if (!controller.signal.aborted) setItems(items); })
+      .catch(error => { if (!controller.signal.aborted) setError(error); });
+    return () => controller.abort();
+  }, [attempt]);
+
+  const dateFormat = new Intl.DateTimeFormat(language === 'bn' ? 'bn-BD' : 'en-GB', {
+    dateStyle: 'medium', timeZone: 'Asia/Dhaka',
+  });
+
+  return <>
+    <div className="citizen-profile-actions">
+      <dl><dt>{t.auth.email}</dt><dd>{session.email}</dd></dl>
+      <button className="citizen-text-button" type="button" onClick={onSignOut}>{t.signOut}</button>
+    </div>
+    <section className="citizen-profile-complaints">
+      <h2>{t.profile.complaints}</h2>
+      {error ? <>
+        <p className="citizen-error" role="alert">{error.status === 401 ? t.auth.expired : errorCopy(t, error)}</p>
+        <button type="button" className="citizen-text-button" onClick={() => {
+          if (error.status === 401) onExpired();
+          else {
+            setError(null);
+            setAttempt(value => value + 1);
+          }
+        }}>{error.status === 401 ? t.signIn : t.profile.retry}</button>
+      </> : items === null ? <p role="status">{t.auth.wait}</p> : items.length === 0
+        ? <p>{t.profile.empty}</p>
+        : <ul className="citizen-profile-list">
+          {items.map(item => <li key={item.id}>
+            <div><strong>{item.title}</strong>
+              <small>{item.area} · <time dateTime={item.created_at}>{dateFormat.format(new Date(item.created_at))}</time></small>
+            </div>
+            <span>{t.status[item.status] || item.status}</span>
+          </li>)}
+        </ul>}
+      <a className="citizen-text-button" href="#report">{t.report}<ArrowRight size={16} aria-hidden="true"/></a>
+    </section>
+  </>;
+}
+
 function AccountDialog({t, onClose, onLogin}) {
   const dialog = useRef(null);
+  useEffect(() => { dialog.current?.showModal(); }, []);
+
+  return <dialog ref={dialog} className="citizen-dialog citizen-card" onClose={onClose} aria-labelledby="citizen-account-heading">
+    <button type="button" className="citizen-close" aria-label={t.auth.close} onClick={() => dialog.current.close()}>
+      <X size={22} aria-hidden="true"/>
+    </button>
+    <span className="citizen-card-icon"><UserRound size={22} aria-hidden="true"/></span>
+    <AccountForm t={t} onLogin={onLogin}/>
+    <a className="citizen-text-button citizen-admin-link" href="#admin" onClick={() => dialog.current.close()}>
+      <ShieldCheck size={16} aria-hidden="true"/>{t.workspace}
+    </a>
+  </dialog>;
+}
+
+function AccountForm({t, admin = false, onLogin}) {
   const [register, setRegister] = useState(false);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState(null);
   const [created, setCreated] = useState(false);
-  const heading = register ? t.auth.register : t.auth.signIn;
-
-  useEffect(() => { dialog.current?.showModal(); }, []);
+  const heading = admin ? t.auth.adminSignIn : register ? t.auth.register : t.auth.signIn;
 
   async function submit(event) {
     event.preventDefault();
@@ -389,24 +487,23 @@ function AccountDialog({t, onClose, onLogin}) {
     }
   }
 
-  return <dialog ref={dialog} className="citizen-dialog citizen-card" onClose={onClose} aria-labelledby="citizen-account-heading">
-    <button type="button" className="citizen-close" aria-label={t.auth.close} onClick={() => dialog.current.close()}><X size={22} aria-hidden="true"/></button>
-    <span className="citizen-card-icon"><UserRound size={22} aria-hidden="true"/></span>
-    <h2 id="citizen-account-heading">{heading}</h2>
-    <p>{t.privacyTitle}</p>
+  return <>
+    {!admin && <h2 id="citizen-account-heading">{heading}</h2>}
     <form className="citizen-form" onSubmit={submit}>
       <label>{t.auth.email}<input name="email" type="email" autoComplete="email" required maxLength={254} disabled={busy}/></label>
-      <label>{t.auth.password}<input key={register} name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={10} maxLength={128} required disabled={busy}/></label>
-      {!register && <details className="citizen-optional">
-        <summary>{t.auth.otpPrompt}</summary>
-        <label>{t.auth.otp}<input name="otp" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" maxLength={6} disabled={busy}/></label>
-      </details>}
+      <label>{t.auth.password}
+        <input key={register} name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={10} maxLength={128} required disabled={busy}/>
+        {register && <small>{t.auth.passwordHint}</small>}
+      </label>
+      {admin && <label>{t.auth.otp}
+        <input name="otp" inputMode="numeric" pattern="[0-9]{6}" autoComplete="one-time-code" maxLength={6} required disabled={busy}/>
+      </label>}
       {created && <p role="status">{t.auth.created}</p>}
       {detail && <p className="citizen-error" role="alert">{errorCopy(t, detail, 'auth')}</p>}
       <button type="submit" className="citizen-button citizen-submit" disabled={busy}>{busy ? t.auth.wait : heading}<ArrowRight size={18} aria-hidden="true"/></button>
     </form>
-    <button type="button" className="citizen-text-button" disabled={busy} onClick={() => {setRegister(!register); setDetail(null); setCreated(false);}}>
+    {!admin && <button type="button" className="citizen-text-button" disabled={busy} onClick={() => {setRegister(!register); setDetail(null); setCreated(false);}}>
       {register ? t.auth.signIn : t.auth.register}
-    </button>
-  </dialog>;
+    </button>}
+  </>;
 }
