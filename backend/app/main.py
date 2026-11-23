@@ -77,7 +77,7 @@ def serialize(item):
 
 @app.get('/api/health')
 def health():
-    return {'status': 'ok', 'classification': 'trained' if text_model else 'rules', 'embeddings': encoder is not None, 'calibrated_model': text_model is not None, 'voice': (ARTIFACTS / 'whisper/model.bin').is_file(), 'image': (ARTIFACTS / 'road/road.onnx').is_file()}
+    return {'status': 'ok', 'classification': 'trained' if text_model else 'rules', 'embeddings': encoder is not None, 'calibrated_model': text_model is not None, 'voice': (ARTIFACTS / 'whisper/model.bin').is_file(), 'image': (ARTIFACTS / 'road/road.onnx').is_file(), 'closure_benchmark': (ARTIFACTS / 'forecast.joblib').is_file()}
 
 @app.get("/api/research/closure-benchmark")
 def closure_benchmark(category: str, occurred_at: datetime):

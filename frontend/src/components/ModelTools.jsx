@@ -31,9 +31,9 @@ const mediaCopy = {
   },
 };
 
-export function MediaTools({language, onTranscript, uiLanguage = 'en'}) {
+export function MediaTools({language, onTranscript, uiLanguage = 'en', voiceAvailable = true, imageAvailable = true}) {
   const t = mediaCopy[uiLanguage];
-  const [kind, setKind] = useState('voice');
+  const [kind, setKind] = useState(voiceAvailable ? 'voice' : 'image');
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
   const [result, setResult] = useState(null);
@@ -77,11 +77,11 @@ export function MediaTools({language, onTranscript, uiLanguage = 'en'}) {
   }
 
   return <details className="media-tools">
-    <summary>{t.summary}</summary>
+    <summary>{voiceAvailable && imageAvailable ? t.summary : voiceAvailable ? t.voice : t.photo}</summary>
     <p className="field-hint">{t.note}</p>
     <div className="media-options">
-      <button type="button" className="secondary" aria-pressed={kind === 'voice'} disabled={busy} onClick={() => selectKind('voice')}><Mic size={16}/>{t.voice}</button>
-      <button type="button" className="secondary" aria-pressed={kind === 'image'} disabled={busy} onClick={() => selectKind('image')}><Image size={16}/>{t.photo}</button>
+      {voiceAvailable && <button type="button" className="secondary" aria-pressed={kind === 'voice'} disabled={busy} onClick={() => selectKind('voice')}><Mic size={16}/>{t.voice}</button>}
+      {imageAvailable && <button type="button" className="secondary" aria-pressed={kind === 'image'} disabled={busy} onClick={() => selectKind('image')}><Image size={16}/>{t.photo}</button>}
     </div>
     <label>{kind === 'voice' ? t.audioFile : t.imageFile}
       <input key={kind} type="file" accept={kind === 'voice' ? 'audio/*,.webm' : 'image/jpeg,image/png,image/webp'} disabled={busy}

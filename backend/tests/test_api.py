@@ -1,5 +1,6 @@
 import os
 import tempfile
+import jwt
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 os.environ['DATABASE_URL'] = 'sqlite:///' + str(Path(tempfile.mkdtemp()) / 'test.db')
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 from backend.app.main import app, limits, hasher
 from backend.app.db import SessionLocal
 from backend.app.models import User
+from backend.app.security import JWT_SECRET, SESSION_AUDIENCE, SESSION_ISSUER
 
 def payload(**changes):
     return {'title': 'Water supply issue', 'text': 'No water near the school for three days', 'area': 'Mirpur 10', 'language': 'English', 'occurred_at': (datetime.now(timezone.utc)-timedelta(hours=1)).isoformat(), **changes}
@@ -31,6 +33,7 @@ def test_admin_authorization_and_audit():
         client.post('/api/auth/register', json={'email':'citizen@example.org','password':'test-password-123'})
         assert client.post('/api/auth/login',json={'email':'citizen@example.org','password':'test-password-123'}).status_code == 200
         assert client.get('/api/admin/complaints').status_code == 403
+        assert client.get('/api/admin/audit').status_code == 403
         with SessionLocal() as db:
             db.add(User(email='admin@example.org',password_hash=hasher.hash('test-admin-password'),role='admin'))
             db.commit()
@@ -39,7 +42,8 @@ def test_admin_authorization_and_audit():
         response=client.patch('/api/admin/complaints/'+item['id'],json={'status':'In progress','priority':'High','note':'Verified the incident location with the service team.'})
         assert response.status_code == 200
         assert response.json()['analysis']['requires_review'] is False
-        assert len(client.get('/api/admin/audit').json()) >= 1
+        review_log = client.get('/api/admin/audit').json()
+        assert any(entry['complaint_id'] == item['id'] for entry in review_log)
 
 def test_validation_and_throttle():
     limits.clear()
@@ -103,9 +107,29 @@ def test_security_boundaries(tmp_path):
         assert logged.status_code==200 and 'token' not in logged.json()
         assert 'httponly' in logged.headers['Set-Cookie'].lower() and 'samesite=strict' in logged.headers['Set-Cookie'].lower()
         old=client.cookies.get('civicai_session')
+        claims = jwt.decode(old, JWT_SECRET, algorithms=['HS256'], issuer=SESSION_ISSUER, audience=SESSION_AUDIENCE)
+        assert claims['exp'] - claims['iat'] == 3600
+        assert 'email' not in claims and 'role' not in claims
         assert client.get('/api/auth/me').status_code==200
         assert client.post('/api/auth/logout').status_code==200
         assert client.get('/api/auth/me',headers={'Cookie':'civicai_session='+old}).status_code==401
+
+def test_multilingual_triage_preview_returns_explanation():
+    limits.clear()
+    reports = [
+        ('Bangla', 'স্কুলের কাছে পাইপ ভেঙে পানি নেই'),
+        ('English', 'No water near the school because the pipe broke'),
+        ('Banglish', 'school er kache pani nai, pipe bhanga'),
+    ]
+    with TestClient(app) as client:
+        for language, text in reports:
+            response = client.post('/api/analyze', json=payload(language=language, text=text))
+            assert response.status_code == 200
+            result = response.json()
+            assert set(result).issuperset({'category', 'priority', 'score', 'breakdown'})
+            assert result['score'] == min(100, sum(step['points'] for step in result['breakdown']))
+            assert result['requires_review'] is True
+            assert 'tracking_key' not in result
 
 def test_authenticator_replay_for_enrolled_admin(monkeypatch):
     import base64

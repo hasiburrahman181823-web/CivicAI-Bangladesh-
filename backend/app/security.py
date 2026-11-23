@@ -1,9 +1,10 @@
-"""Request boundaries and server-managed login sessions."""
+"""Request boundaries and signed, revocable login sessions."""
 import hashlib
 import hmac
 import secrets
 import time
 import anyio
+import jwt
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
 from threading import Lock
@@ -18,6 +19,8 @@ from .config import CORS_ORIGINS, JWT_SECRET, PRODUCTION, REDIS_URL
 from .models import LoginSession, User
 
 COOKIE = "__Host-civicai" if PRODUCTION else "civicai_session"
+SESSION_ISSUER = "civicai-bangladesh"
+SESSION_AUDIENCE = "civicai-web"
 limits = OrderedDict()
 limit_lock = Lock()
 redis_client = None
@@ -62,23 +65,43 @@ def session_digest(token):
     return hashlib.sha256(token.encode()).hexdigest()
 
 def issue_session(db, user, response, mfa_verified, prior_token=None):
-    token = secrets.token_urlsafe(32)
     seconds = 900 if user.role == "admin" else 3600
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    expires_at = now + timedelta(seconds=seconds)
+    token = jwt.encode(
+        {"iss": SESSION_ISSUER, "aud": SESSION_AUDIENCE, "iat": now, "exp": expires_at,
+         "jti": secrets.token_urlsafe(32)},
+        JWT_SECRET,
+        algorithm="HS256",
+    )
     db.execute(delete(LoginSession).where(LoginSession.expires_at <= now))
     if prior_token:
         db.execute(delete(LoginSession).where(LoginSession.digest == session_digest(prior_token)))
     db.add(LoginSession(digest=session_digest(token), user_id=user.id,
-                        expires_at=now+timedelta(seconds=seconds), mfa_verified=mfa_verified))
+                        expires_at=expires_at, mfa_verified=mfa_verified))
     db.commit()
     response.set_cookie(COOKIE, token, max_age=seconds, httponly=True, secure=PRODUCTION,
                         samesite="strict", path="/")
 
+def valid_session_token(token):
+    if not token or len(token) > 1024 or not token.isascii():
+        return False
+    # Existing opaque cookies can finish their original, database-bound session.
+    if len(token) == 43 and "." not in token:
+        return True
+    try:
+        jwt.decode(
+            token, JWT_SECRET, algorithms=["HS256"], issuer=SESSION_ISSUER, audience=SESSION_AUDIENCE,
+            options={"require": ["iss", "aud", "iat", "exp", "jti"]},
+        )
+    except jwt.InvalidTokenError:
+        return False
+    return True
+
+
 def get_session(request, db, required=True):
     token = request.cookies.get(COOKIE)
-    if not token and not required:
-        return None, None
-    if token and len(token) == 43 and token.isascii():
+    if valid_session_token(token):
         session = db.get(LoginSession, session_digest(token))
         if session:
             expiry = session.expires_at
@@ -88,6 +111,8 @@ def get_session(request, db, required=True):
                 user = db.get(User, session.user_id)
                 if user:
                     return user, session
+    if not required:
+        return None, None
     raise HTTPException(401, "Please sign in again")
 
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; "

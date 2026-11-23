@@ -15,6 +15,7 @@ RUN groupadd -g 10001 civicai && useradd -r -u 10001 -g civicai civicai \
 COPY backend/requirements.txt backend/requirements-ml.txt /app/backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt -r backend/requirements-ml.txt
 COPY backend /app/backend
+ADD backend/civicai-models.tar.gz /app/release-models/
 COPY --from=frontend /web/dist /app/dist
 USER 10001:10001
 EXPOSE 8000

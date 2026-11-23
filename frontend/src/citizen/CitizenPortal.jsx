@@ -1,8 +1,8 @@
 import React, {lazy, Suspense, useEffect, useRef, useState} from 'react';
 import {
   ArrowDown, ArrowLeft, ArrowRight, CheckCircle2, ClipboardList, Construction,
-  Download, Droplets, FileText, LockKeyhole, MapPin, Search, ShieldCheck,
-  Trash2, UserRound, X, Zap,
+  Download, Droplets, FileText, LockKeyhole, MapPin, Moon, Search, ShieldCheck,
+  Sun, Trash2, UserRound, X, Zap,
 } from 'lucide-react';
 import {request} from '../api/client';
 import {MediaTools} from '../components/ModelTools';
@@ -13,7 +13,7 @@ import './portal.css';
 const Workspace = lazy(() => import('../Workspace'));
 const issueIcons = [Construction, Droplets, Trash2, Zap];
 const languages = ['Bangla', 'English', 'Banglish'];
-const emptyForm = {title: '', area: '', text: '', time: '', language: ''};
+const emptyForm = {title: '', area: '', text: '', time: '', language: '', latitude: '', longitude: ''};
 const isPreview = import.meta.env.VITE_UI_PREVIEW === '1';
 
 function errorCopy(t, problem, context) {
@@ -45,10 +45,12 @@ function LanguageSwitcher({language, onChange, label}) {
 
 export function CitizenPortal() {
   const [language, setLanguage] = useState(() => localStorage.getItem('civic-language') === 'en' ? 'en' : 'bn');
+  const [dark, setDark] = useState(() => localStorage.getItem('civic-theme') === 'dark');
   const [route, setRoute] = useState(() => window.location.hash);
   const [session, setSession] = useState(null);
   const [account, setAccount] = useState(false);
   const [checkingSession, setCheckingSession] = useState(!isPreview);
+  const [models, setModels] = useState(null);
   const [accountError, setAccountError] = useState(null);
   const [trackingReceipt, setTrackingReceipt] = useState(null);
   const trackHeading = useRef(null);
@@ -65,6 +67,7 @@ export function CitizenPortal() {
   useEffect(() => {
     let active = true;
     if (!isPreview) {
+      request('/health').then(value => { if (active) setModels(value); }).catch(() => {});
       request('/auth/me')
         .then(value => { if (active) setSession(value); })
         .catch(error => { if (active && error.status !== 401) setAccountError(error); })
@@ -82,6 +85,12 @@ export function CitizenPortal() {
     document.documentElement.lang = language;
     localStorage.setItem('civic-language', language);
   }, [language]);
+
+  useEffect(() => {
+    const theme = dark ? 'dark' : 'light';
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem('civic-theme', theme);
+  }, [dark]);
 
   useEffect(() => {
     const section = route === '#track' ? trackHeading.current
@@ -125,6 +134,10 @@ export function CitizenPortal() {
           </nav>
           <div className="citizen-actions">
             {languageControl}
+            <button type="button" className="citizen-account citizen-theme" aria-label={dark ? t.dayMode : t.nightMode}
+              onClick={() => setDark(value => !value)}>
+              {dark ? <Sun size={17} aria-hidden="true"/> : <Moon size={17} aria-hidden="true"/>}
+            </button>
             {session
               ? <a className="citizen-account" href="#profile" aria-current={profile ? 'page' : undefined}>
                 <UserRound size={17} aria-hidden="true"/>{t.profile.title}
@@ -159,7 +172,7 @@ export function CitizenPortal() {
                 </div>
               </div>
               <section className="citizen-card citizen-report" id="report" tabIndex={-1} ref={reportPanel} aria-label={t.formTitle}>
-                <ComplaintForm t={t} language={language} onTrack={trackReport}/>
+                <ComplaintForm t={t} language={language} onTrack={trackReport} models={models}/>
               </section>
             </div>
           </section>
@@ -215,7 +228,7 @@ export function CitizenPortal() {
     </div>
     {workspaceOpen && <WorkspaceLanguage.Provider value={workspaceLanguage}>
       <Suspense fallback={<p className="citizen-loading" role="status">{t.auth.wait}</p>}>
-        <Workspace initialSession={session} languageControl={languageControl} preview={isPreview}
+        <Workspace initialSession={session} languageControl={languageControl} preview={isPreview} dark={dark} setDark={setDark} models={models}
           onExit={() => { window.location.hash = 'home'; }} onLogout={() => setSession(null)}/>
       </Suspense>
     </WorkspaceLanguage.Provider>}
@@ -234,12 +247,15 @@ function CardHeader({Icon, title, intro, headingRef, primaryHeading = false}) {
   </div>;
 }
 
-function ComplaintForm({t, language, onTrack}) {
+function ComplaintForm({t, language, onTrack, models}) {
   const [form, setForm] = useState(emptyForm);
   const [receipt, setReceipt] = useState(null);
-  const [busy, setBusy] = useState(false);
+  const [action, setAction] = useState(null);
   const [error, setError] = useState(null);
+  const [suggestion, setSuggestion] = useState(null);
   const receiptHeading = useRef(null);
+  const busy = action !== null;
+  const number = new Intl.NumberFormat(language === 'bn' ? 'bn-BD' : 'en-GB');
   const complaintLanguage = form.language || (/[\u0980-\u09ff]/.test(form.text) ? 'Bangla' : form.text.trim() ? 'English' : language === 'bn' ? 'Bangla' : 'English');
 
   useEffect(() => { if (receipt) receiptHeading.current?.focus(); }, [receipt]);
@@ -248,12 +264,13 @@ function ComplaintForm({t, language, onTrack}) {
     const {name, value} = event.target;
     setForm(current => ({...current, [name]: value}));
     setError(null);
+    setSuggestion(null);
   }
 
   async function submit(event) {
     event.preventDefault();
     if (isPreview || busy) return;
-    const {title, area, text} = form;
+    const {title, area, text, latitude, longitude} = form;
     if (title.trim().length < 5 || area.trim().length < 2 || text.trim().length < 10) {
       setError('shortReport');
       return;
@@ -263,23 +280,35 @@ function ComplaintForm({t, language, onTrack}) {
       setError('invalidTime');
       return;
     }
-    setBusy(true);
+    if ((latitude === '') !== (longitude === '')) {
+      setError('coordinatePair');
+      return;
+    }
+    const previewing = event.nativeEvent.submitter?.value === 'suggest';
+    setAction(previewing ? 'suggest' : 'submit');
     setError(null);
     try {
-      const result = await request('/complaints', {
+      const result = await request(previewing ? '/analyze' : '/complaints', {
         method: 'POST',
         body: JSON.stringify({
           title: title.trim(), area: area.trim(), text: text.trim(),
           occurred_at: date.toISOString(), language: complaintLanguage,
+          latitude: latitude === '' ? null : Number(latitude),
+          longitude: longitude === '' ? null : Number(longitude),
         }),
       });
+      if (previewing) {
+        setSuggestion(result);
+        return;
+      }
       if (!result?.id || !result?.tracking_key) throw new Error('Missing receipt');
-      setReceipt({id: result.id, tracking_key: result.tracking_key});
+      setReceipt({id: result.id, tracking_key: result.tracking_key, analysis: result.analysis});
       setForm(emptyForm);
+      setSuggestion(null);
     } catch (problem) {
       setError(problem);
     } finally {
-      setBusy(false);
+      setAction(null);
     }
   }
 
@@ -290,7 +319,8 @@ function ComplaintForm({t, language, onTrack}) {
       <div><dt>{t.trackingKey}</dt><dd><code>{receipt.tracking_key}</code></dd></div>
     </dl>
     <button type="button" className="citizen-button citizen-submit" onClick={() => {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(receipt, null, 2)], {type: 'application/json'}));
+      const {id, tracking_key} = receipt;
+      const url = URL.createObjectURL(new Blob([JSON.stringify({id, tracking_key}, null, 2)], {type: 'application/json'}));
       const link = document.createElement('a');
       link.href = url;
       link.download = 'civicai-tracking.json';
@@ -301,6 +331,7 @@ function ComplaintForm({t, language, onTrack}) {
       <button type="button" className="citizen-text-button" onClick={() => onTrack(receipt)}>{t.trackLink}<ArrowRight size={16} aria-hidden="true"/></button>
       <button type="button" className="citizen-text-button" onClick={() => setReceipt(null)}>{t.newReport}</button>
     </div>
+    {receipt.analysis && <TriageSuggestion result={receipt.analysis} t={t} language={language} number={number}/>}
   </div>;
 
   return <>
@@ -316,7 +347,7 @@ function ComplaintForm({t, language, onTrack}) {
       </div>
       <label>{t.details}
         <textarea name="text" value={form.text} onChange={change} placeholder={t.detailsPlaceholder} minLength={10} maxLength={1000} rows={3} required disabled={busy}/>
-        <small className="citizen-counter">{new Intl.NumberFormat(language).format(form.text.length)} / {new Intl.NumberFormat(language).format(1000)}</small>
+        <small className="citizen-counter">{number.format(form.text.length)} / {number.format(1000)}</small>
       </label>
       <details className="citizen-optional">
         <summary>{t.extra}<span>{t.optional}</span></summary>
@@ -331,22 +362,57 @@ function ComplaintForm({t, language, onTrack}) {
             </select>
           </label>
         </div>
+        <div className="citizen-form-row">
+          <label>{t.latitude}<input name="latitude" type="number" step="any" min="-90" max="90" value={form.latitude} onChange={change} disabled={busy}/></label>
+          <label>{t.longitude}<input name="longitude" type="number" step="any" min="-180" max="180" value={form.longitude} onChange={change} disabled={busy}/></label>
+        </div>
+        <small>{t.coordinateHint}</small>
       </details>
       {error && <p className="citizen-error" role="alert">{typeof error === 'string' ? t[error] : errorCopy(t, error, 'report')}</p>}
-      <button className="citizen-button citizen-submit" type="submit" disabled={busy || isPreview}>
-        <span>{busy ? t.sending : t.send}</span><ArrowRight size={19} aria-hidden="true"/>
+      <button className="citizen-button citizen-submit" type="submit" value="submit" disabled={busy || isPreview}>
+        <span>{action === 'submit' ? t.sending : t.send}</span><ArrowRight size={19} aria-hidden="true"/>
       </button>
+      <button className="citizen-text-button" type="submit" value="suggest" disabled={busy || isPreview}>{action === 'suggest' ? t.checking : t.checkSuggestion}</button>
+      {suggestion && <TriageSuggestion result={suggestion} t={t} language={language} number={number}/>}
     </form>
-    {!isPreview && <MediaTools
+    {(models?.voice || models?.image) && <MediaTools
+      voiceAvailable={models.voice}
+      imageAvailable={models.image}
       language={complaintLanguage}
       uiLanguage={language}
       onTranscript={text => {
         setForm(previous => ({...previous, text: text.slice(0, 1000)}));
         setError(null);
+        setSuggestion(null);
       }}
     />}
     <p className="citizen-form-privacy"><LockKeyhole size={15} aria-hidden="true"/>{t.privacyText}</p>
   </>;
+}
+
+function TriageSuggestion({result, t, language, number}) {
+  const translate = message => translateWorkspace(language, message);
+  return <section className="citizen-triage" aria-live="polite">
+    <h3>{t.suggestion}</h3>
+    <dl>
+      <div><dt>{translate('Category')}</dt><dd>{translate(result.category)}</dd></div>
+      <div><dt>{translate('Priority')}</dt><dd>{translate(result.priority)}</dd></div>
+      <div><dt>{translate('Priority score')}</dt><dd>{number.format(result.score)} / {number.format(100)}</dd></div>
+    </dl>
+    <details>
+      <summary>{t.explanation}</summary>
+      <ul>
+        {result.breakdown.map(step => {
+          const label = step.label.startsWith('Trained severity: ')
+            ? translateWorkspace(language, 'Trained severity: {severity}', {severity: translate(step.label.slice(18))})
+            : translate(step.label);
+          return <li key={step.label}><span>{label}</span><strong>+{number.format(step.points)}</strong></li>;
+        })}
+      </ul>
+      <p>{translate(result.method)}</p>
+    </details>
+    <p>{t.humanReview}</p>
+  </section>;
 }
 
 function TrackingForm({t, receipt}) {

@@ -1,0 +1,29 @@
+.workspace-filters { margin-bottom: 16px; }
+.workspace-filter-fields { display: grid; grid-template-columns: minmax(150px, 1.3fr) repeat(2, minmax(135px, 1fr)) auto; gap: 10px; align-items: end; }
+.workspace-filter-fields label { display: grid; min-width: 0; gap: 5px; font-size: 13px; }
+.workspace-filter-fields input { width: 100%; margin: 0; }
+.workspace-filter-fields button { min-height: 42px; }
+.workspace-audit ul, .report-map-list { list-style: none; padding: 0; }
+.workspace-audit li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; border-bottom: 1px solid var(--line); padding: 12px 0; overflow-wrap: anywhere; }
+.workspace-audit time, .workspace-audit small { color: var(--muted); font-size: 13px; }
+.workspace-audit li p, .workspace-audit li small { grid-column: 1 / -1; margin: 0; }
+.workspace-audit > button { margin-top: 12px; }
+.workspace-dialog { position: fixed; inset: 0; width: 100%; max-width: none; height: 100%; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; color: var(--text); }
+.workspace-dialog::backdrop { background: transparent; }
+.report-map { position: relative; overflow: hidden; border-radius: 12px; background: var(--map-bg); }
+.report-map svg { width: 100%; max-height: 295px; display: block; }
+.report-map-boundary { fill: var(--map-block); stroke: var(--teal); stroke-width: 1; stroke-linejoin: round; }
+.report-map-place { fill: var(--text); font-size: 8px; font-weight: 700; }
+.report-map-marker { cursor: pointer; }
+.report-map-marker circle:nth-child(2) { fill: var(--teal); stroke: var(--surface); stroke-width: 1.5; }
+.report-map-marker:focus-visible circle:nth-child(2) { stroke: var(--text); stroke-width: 3; }
+.report-map-marker text { fill: var(--surface); font-size: 9px; font-weight: 800; pointer-events: none; }
+.report-map-caption, .report-map-source { display: block; margin: 0; padding: 5px 12px; color: var(--text); font-size: 12px; }
+.report-map-list { margin: 0; padding: 8px 12px; max-height: 148px; overflow-y: auto; }
+.report-map-list button { text-align: left; white-space: normal; }
+@media (max-width: 1050px) {
+  .workspace-filter-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 470px) {
+  .workspace-filter-fields, .workspace-audit li { grid-template-columns: 1fr; }
+}

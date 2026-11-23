@@ -76,6 +76,8 @@ For verified duplicate incidents, fill `backend/ml_training/data/reviewed_pairs_
 
 Use an HTTPS reverse proxy with the same site origin for the frontend and API. The provided Compose configuration binds CivicAI to localhost and runs Redis on its private container network. The production app requires a trusted host, shared throttling, a separate administrator MFA encryption key, and the release model manifest digest. See [security setup and dataset handling](docs/security.md) for secrets, admin enrollment, backups and upgrades.
 
-The existing public preview has not been updated with this backend. Run the packaged site locally for the supervisor demo, or install the hardened release and configure the production prerequisites on a suitable HTTPS host.
+The [Render deployment](https://civicai-bangladesh-live-tivv.onrender.com/) uses the verified text and research models in `backend/civicai-models.tar.gz`. This package contains the CivicAI category and severity classifiers based on [BanglaPSG by Rahman et al., CC BY 4.0](https://doi.org/10.17632/w6c4zx5t2s.1) and the closure-time benchmark based on [NYC 311 Open Data](https://data.cityofnewyork.us/d/erm2-nwe9). Media models and multilingual embeddings are optional in the full local release. The deployed duplicate review compares text overlap, incident times and locations.
+
+The public form and private tracking page work without an account. Signed-in citizens can view their own submissions. Citizen login cookies expire after 60 minutes, and administrator sessions expire after 15 minutes and require MFA in production. The administrator dashboard filters the latest 500 loaded complaints by area and incident dates in Bangladesh time. The map displays incidents with optional coordinates and uses a Natural Earth boundary.
 
 Model output supports review. It does not represent an official or emergency service decision.
