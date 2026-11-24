@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, delete
+from sqlalchemy import select, delete, func
 from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import ALLOWED_HOSTS, CORS_ORIGINS, PRODUCTION
@@ -75,6 +75,32 @@ def serialize(item):
 @app.get('/api/health')
 def health():
     return {'status': 'ok', 'classification': 'trained' if text_model else 'rules', 'embeddings': encoder is not None, 'calibrated_model': text_model is not None, 'voice': (ARTIFACTS / 'whisper/model.bin').is_file(), 'image': (ARTIFACTS / 'road/road.onnx').is_file(), 'closure_benchmark': (ARTIFACTS / 'forecast.joblib').is_file()}
+
+@app.get('/api/public/summary')
+def public_summary(request: Request, db=Depends(get_db)):
+    throttle(request, 'public-summary', 60)
+    status_counts = {'Submitted': 0, 'Under review': 0, 'In progress': 0, 'Resolved': 0}
+    categories = {}
+    total = 0
+    for status, category, count in db.execute(
+        select(Complaint.status, Complaint.category, func.count()).group_by(Complaint.status, Complaint.category)
+    ):
+        total += count
+        if status in status_counts:
+            status_counts[status] += count
+        categories[category] = categories.get(category, 0) + count
+    # Publish only overall totals and sufficiently large categories.
+    return {
+        'total': total,
+        'resolved': status_counts['Resolved'],
+        'in_progress': status_counts['In progress'],
+        'awaiting_action': status_counts['Submitted'] + status_counts['Under review'],
+        'categories': [
+            {'name': name, 'count': count}
+            for name, count in sorted(categories.items(), key=lambda item: (-item[1], item[0]))
+            if count >= 5
+        ],
+    }
 
 @app.get("/api/research/closure-benchmark")
 def closure_benchmark(category: str, occurred_at: datetime):
@@ -175,7 +201,10 @@ def track(complaint_id: uuid.UUID, payload: TrackingInput, request: Request, db=
 
 @app.get('/api/admin/complaints')
 def all_complaints(user=Depends(admin), db=Depends(get_db)):
-    return [serialize(item) for item in db.scalars(select(Complaint).order_by(Complaint.created_at.desc()).limit(500))]
+    return [serialize(item) for item in db.scalars(recent_complaints())]
+
+def recent_complaints():
+    return select(Complaint).order_by(Complaint.created_at.desc(), Complaint.id.desc()).limit(500)
 
 @app.patch('/api/admin/complaints/{complaint_id}')
 def review(complaint_id: str, data: ReviewInput, user=Depends(admin), db=Depends(get_db)):
@@ -204,7 +233,7 @@ def duplicates(complaint_id: str, request: Request, user=Depends(admin), db=Depe
     item = db.get(Complaint, complaint_id)
     if not item:
         raise HTTPException(404, 'Complaint not found')
-    return duplicate_candidates(item, db.scalars(select(Complaint).limit(500)).all(), encoder)
+    return duplicate_candidates(item, db.scalars(recent_complaints()).all(), encoder)
 
 @app.get('/api/admin/audit')
 def audit(user=Depends(admin), db=Depends(get_db)):

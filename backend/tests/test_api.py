@@ -1,5 +1,6 @@
 import os
 import tempfile
+import uuid
 import jwt
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
@@ -7,7 +8,7 @@ os.environ['DATABASE_URL'] = 'sqlite:///' + str(Path(tempfile.mkdtemp()) / 'test
 from fastapi.testclient import TestClient
 from backend.app.main import app, limits, hasher
 from backend.app.db import Base, SessionLocal, get_db
-from backend.app.models import User
+from backend.app.models import Complaint, User
 from backend.app.routers import recovery
 from backend.app.security import JWT_SECRET, SESSION_AUDIENCE, SESSION_ISSUER
 
@@ -45,6 +46,35 @@ def test_admin_authorization_and_audit():
         assert response.json()['analysis']['requires_review'] is False
         review_log = client.get('/api/admin/audit').json()
         assert any(entry['complaint_id'] == item['id'] for entry in review_log)
+
+def test_public_summary_publishes_totals_and_hides_small_categories():
+    limits.clear()
+    with TestClient(app) as client:
+        original = client.get('/api/public/summary').json()
+        hidden = 'Dashboard-only test category'
+        shown = 'Published test category'
+        statuses = ['Submitted', 'Under review', 'In progress', 'Resolved', 'Resolved']
+        with SessionLocal() as db:
+            for category, status in [(hidden, 'Submitted'), *[(shown, status) for status in statuses]]:
+                db.add(Complaint(
+                    id=str(uuid.uuid4()), tracking_hash='0' * 64, title='Private complaint title',
+                    text='Private complaint description', area='Private location', language='Bangla',
+                    latitude=23.8, longitude=90.4, occurred_at=datetime.now(timezone.utc),
+                    category=category, priority='Low', score=10, status=status, analysis={},
+                ))
+            db.commit()
+        response = client.get('/api/public/summary')
+        assert response.status_code == 200
+        summary = response.json()
+        assert set(summary) == {'total', 'resolved', 'in_progress', 'awaiting_action', 'categories'}
+        assert summary['total'] == original['total'] + 6
+        assert summary['resolved'] == original['resolved'] + 2
+        assert summary['in_progress'] == original['in_progress'] + 1
+        assert summary['awaiting_action'] == original['awaiting_action'] + 3
+        categories = {item['name']: item['count'] for item in summary['categories']}
+        assert categories[shown] == 5 and hidden not in categories
+        assert 'Private complaint title' not in response.text and 'Private location' not in response.text
+        assert client.get('/api/admin/complaints').status_code == 401
 
 def test_validation_and_throttle():
     limits.clear()

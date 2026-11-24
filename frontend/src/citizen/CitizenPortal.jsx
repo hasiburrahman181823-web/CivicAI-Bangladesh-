@@ -7,11 +7,13 @@ import {
 import {request} from '../api/client';
 import {MediaTools} from '../components/ModelTools';
 import {FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
+import {PublicDashboard} from './PublicDashboard';
 import {copy} from './copy';
 import {translateWorkspace, WorkspaceLanguage} from '../workspaceLanguage';
 import './portal.css';
 
 const Workspace = lazy(() => import('../Workspace'));
+const launchYear = 2026;
 const issueIcons = [Construction, Droplets, Trash2, Zap];
 const languages = ['Bangla', 'English', 'Banglish'];
 const emptyForm = {title: '', area: '', text: '', time: '', language: '', latitude: '', longitude: ''};
@@ -56,7 +58,9 @@ export function CitizenPortal() {
   const trackHeading = useRef(null);
   const reportPanel = useRef(null);
   const homeHeading = useRef(null);
+  const dashboardHeading = useRef(null);
   const t = copy[language];
+  const dashboard = route === '#dashboard';
   const tracking = route === '#track';
   const profile = !isPreview && route === '#profile';
   const admin = !isPreview && route === '#admin';
@@ -98,11 +102,12 @@ export function CitizenPortal() {
   }, [dark]);
 
   useEffect(() => {
-    const section = route === '#track' ? trackHeading.current
+    const section = dashboard ? dashboardHeading.current
+      : route === '#track' ? trackHeading.current
       : route === '#report' ? reportPanel.current
       : route === '#home' ? homeHeading.current : null;
     if (section && !workspaceOpen) section.focus();
-  }, [route, workspaceOpen]);
+  }, [dashboard, route, workspaceOpen]);
 
   async function signOut() {
     try {
@@ -118,7 +123,7 @@ export function CitizenPortal() {
     setSession(value);
     setAccount(false);
     setAccountError(null);
-    if (!admin) window.location.hash = value.role === 'admin' ? 'admin' : 'profile';
+    if (!admin) window.location.hash = 'dashboard';
   }
 
   function trackReport(receipt) {
@@ -133,7 +138,8 @@ export function CitizenPortal() {
         <div className="citizen-container citizen-header-inner">
           <Brand t={t}/>
           <nav className="citizen-nav" aria-label={t.navigation}>
-            <a href="#home" aria-current={!tracking && !profile && !admin && !recovering && !settingUpAdmin && route !== '#report' ? 'page' : undefined}>{t.home}</a>
+            <a href="#home" aria-current={!route || route === '#home' ? 'page' : undefined}>{t.home}</a>
+            <a href="#dashboard" aria-current={dashboard ? 'page' : undefined}>{t.dashboard.nav}</a>
             <a href="#report" aria-current={route === '#report' ? 'page' : undefined}>{t.report}</a>
             <a href="#track" aria-current={tracking ? 'page' : undefined}>{t.track}</a>
           </nav>
@@ -160,7 +166,7 @@ export function CitizenPortal() {
       {accountError && <p className="citizen-container citizen-error" role="alert">{errorCopy(t, accountError, 'auth')}</p>}
 
       <main className="citizen-main" id="content" tabIndex={-1}>
-        <div hidden={tracking || profile || admin || recovering || settingUpAdmin}>
+        <div hidden={dashboard || tracking || profile || admin || recovering || settingUpAdmin}>
           <section className="citizen-hero">
             <div className="citizen-container citizen-hero-inner">
               <div className="citizen-hero-copy">
@@ -191,6 +197,10 @@ export function CitizenPortal() {
             </ul>
           </section>
         </div>
+        {dashboard && <WorkspaceLanguage.Provider value={workspaceLanguage}>
+          <PublicDashboard t={t} language={language} headingRef={dashboardHeading} models={models}
+            preview={isPreview} session={session} onSignIn={() => setAccount(true)}/>
+        </WorkspaceLanguage.Provider>}
         {tracking && <section className="citizen-container citizen-tracking">
           <a className="citizen-back" href="#home"><ArrowLeft size={17} aria-hidden="true"/>{t.home}</a>
           <div className="citizen-card">
@@ -228,7 +238,7 @@ export function CitizenPortal() {
                   : <AccountForm t={t} admin onLogin={signedIn}/>
                 : session
                   ? <CitizenProfile key={session.email} t={t} language={language} session={session}
-                    onSignOut={signOut} onExpired={() => setSession(null)}/>
+                    onSignOut={signOut} onExpired={() => { setSession(null); setAccount(true); }}/>
                   : <div className="citizen-form">
                     <button className="citizen-button citizen-submit" type="button" onClick={() => setAccount(true)}>{t.signIn}</button>
                     <a className="citizen-text-button" href="#forgot-password">{recoveryLabel(language, 'forgot')}</a>
@@ -244,17 +254,15 @@ export function CitizenPortal() {
         <div className="citizen-container citizen-footer-inner">
           <Brand t={t}/>
           <p>{t.footer}</p>
-          {!isPreview && <a className="citizen-text-button" href="#admin" aria-current={admin ? 'page' : undefined}>
-            <ShieldCheck size={16} aria-hidden="true"/>{t.workspace}
-          </a>}
+          <small className="citizen-created">{t.created} <time dateTime={String(launchYear)}>{new Intl.NumberFormat(language === 'bn' ? 'bn-BD' : 'en-GB', {useGrouping: false}).format(launchYear)}</time></small>
         </div>
       </footer>
       {account && <AccountDialog t={t} language={language} onClose={() => setAccount(false)} onLogin={signedIn}/>}
     </div>
     {workspaceOpen && <WorkspaceLanguage.Provider value={workspaceLanguage}>
       <Suspense fallback={<p className="citizen-loading" role="status">{t.auth.wait}</p>}>
-        <Workspace initialSession={session} languageControl={languageControl} preview={isPreview} dark={dark} setDark={setDark} models={models}
-          onExit={() => { window.location.hash = 'home'; }} onLogout={() => setSession(null)}/>
+        <Workspace initialSession={session} languageControl={languageControl} preview={isPreview} dark={dark} setDark={setDark}
+          onExit={() => { window.location.hash = 'dashboard'; }} onLogout={() => setSession(null)}/>
       </Suspense>
     </WorkspaceLanguage.Provider>}
   </>;
@@ -502,7 +510,10 @@ function CitizenProfile({t, language, session, onSignOut, onExpired}) {
   return <>
     <div className="citizen-profile-actions">
       <dl><dt>{t.auth.email}</dt><dd>{session.email}</dd></dl>
-      <button className="citizen-text-button" type="button" onClick={onSignOut}>{t.signOut}</button>
+      <div className="citizen-profile-links">
+        {session.role === 'admin' && <a className="citizen-text-button" href="#admin">{t.workspace}</a>}
+        <button className="citizen-text-button" type="button" onClick={onSignOut}>{t.signOut}</button>
+      </div>
     </div>
     <section className="citizen-profile-complaints">
       <h2>{t.profile.complaints}</h2>
@@ -543,9 +554,6 @@ function AccountDialog({t, language, onClose, onLogin}) {
     <AccountForm t={t} onLogin={onLogin}/>
     <a className="citizen-text-button citizen-admin-link" href="#forgot-password" onClick={() => dialog.current.close()}>
       {recoveryLabel(language, 'forgot')}
-    </a>
-    <a className="citizen-text-button citizen-admin-link" href="#admin" onClick={() => dialog.current.close()}>
-      <ShieldCheck size={16} aria-hidden="true"/>{t.workspace}
     </a>
   </dialog>;
 }

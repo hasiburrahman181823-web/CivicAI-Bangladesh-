@@ -340,6 +340,7 @@ const bn = {
   'Complaint or tracking key not found': 'অভিযোগ আইডি বা ট্র্যাকিং কী মেলেনি।',
   'Complaint not found': 'অভিযোগ পাওয়া যায়নি।',
   'Review audit': 'পর্যালোচনার অডিট লগ',
+  'Monitor incoming complaints and the review queue.': 'নতুন অভিযোগ ও পর্যালোচনার অপেক্ষায় থাকা অভিযোগগুলো দেখুন।',
   'Review history for administrator decisions and linked complaints.': 'অ্যাডমিনের সিদ্ধান্ত ও যুক্ত অভিযোগের পর্যালোচনা ইতিহাস।',
   'Latest review actions': 'সাম্প্রতিক পর্যালোচনা',
   'The review audit is available in the live admin workspace.': 'লাইভ অ্যাডমিন প্যানেলে অডিট লগ পাওয়া যাবে।',
