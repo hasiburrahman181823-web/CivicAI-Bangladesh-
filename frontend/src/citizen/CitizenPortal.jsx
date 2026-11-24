@@ -140,7 +140,14 @@ export function CitizenPortal() {
       : route === '#track' ? trackHeading.current
       : route === '#report' ? reportPanel.current
       : route === '#home' ? homeHeading.current : null;
-    if (section && !workspaceOpen) section.focus();
+    if (section && !workspaceOpen) {
+      if (route === '#home') {
+        section.focus({preventScroll: true});
+        window.scrollTo(0, 0);
+      } else {
+        section.focus();
+      }
+    }
   }, [dashboard, route, workspaceOpen]);
 
   async function signOut() {
@@ -203,7 +210,7 @@ export function CitizenPortal() {
         <div hidden={dashboard || tracking || profile || admin || recovering || settingUpAdmin}>
           <section className="citizen-hero">
             <div className="citizen-hero-photo" aria-hidden="true">
-              <img src="/civicai-home-reference.jpg" width="1344" height="756" alt="" fetchPriority={route === '#home' || !route ? 'high' : 'auto'}/>
+              <img src="/civicai-hero.webp" width="1536" height="1024" alt="" fetchPriority={route === '#home' || !route ? 'high' : 'auto'}/>
             </div>
             <div className="citizen-hero-waves" aria-hidden="true"/>
             <div className="citizen-container citizen-hero-inner">
@@ -282,7 +289,7 @@ export function CitizenPortal() {
         <div className="citizen-container citizen-footer-inner">
           <Brand t={t}/>
           <p>{t.footer}</p>
-          <small className="citizen-created">{t.created} <time dateTime={String(launchYear)}>{new Intl.NumberFormat(language === 'bn' ? 'bn-BD' : 'en-GB', {useGrouping: false}).format(launchYear)}</time></small>
+          <small className="citizen-copyright">© <time dateTime={String(launchYear)}>{launchYear}</time> CivicAI</small>
         </div>
       </footer>
       {account && <AccountDialog t={t} language={language} onClose={() => setAccount(false)} onLogin={signedIn}/>}

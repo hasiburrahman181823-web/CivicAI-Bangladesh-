@@ -2,7 +2,6 @@ export const copy = {
   bn: {
     brand: 'সিভিকএআই', country: 'বাংলাদেশ',
     home: 'হোম', report: 'অভিযোগ করুন', track: 'অভিযোগ ট্র্যাক করুন',
-    created: 'তৈরির সাল',
     dashboard: {
       nav: 'ড্যাশবোর্ড', title: 'নাগরিক ড্যাশবোর্ড',
       intro: 'নতুন অভিযোগ করুন, আগের অভিযোগের অগ্রগতি দেখুন এবং পোর্টালের সারসংক্ষেপ জানুন।',
@@ -101,7 +100,6 @@ export const copy = {
   en: {
     brand: 'CivicAI', country: 'Bangladesh',
     home: 'Home', report: 'Report an issue', track: 'Track a complaint',
-    created: 'Created in',
     dashboard: {
       nav: 'Dashboard', title: 'Citizen dashboard',
       intro: 'Submit a complaint, follow its progress and see an overview of reports across the portal.',

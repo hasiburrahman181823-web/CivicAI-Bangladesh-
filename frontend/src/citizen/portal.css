@@ -73,6 +73,8 @@ body { margin: 0; }
 .citizen-skip:focus { transform: translateY(0); }
 
 .citizen-hero {
+  --hero-photo-height: clamp(265px, 30vw, 450px);
+  --hero-top-padding: clamp(34px, 4.25vw, 66px);
   overflow: hidden;
   color: #fff;
   background:
@@ -87,20 +89,20 @@ body { margin: 0; }
   position: absolute;
   z-index: -1;
   inset: 0 auto auto 0;
-  width: min(51.34vw, 930px);
-  aspect-ratio: 690 / 355;
-  overflow: hidden;
-  mask-image: linear-gradient(#000 34%, transparent 42%),
-    radial-gradient(ellipse 19% 81% at 97% 31%, #000 37%, transparent 86%);
+  width: min(51.5vw, 950px);
+  height: var(--hero-photo-height);
+  mask-image: linear-gradient(#000 45%, #000e 60%, #0008 79%, transparent),
+    linear-gradient(90deg, #000 92%, transparent);
+  mask-composite: intersect;
   pointer-events: none;
 }
 
 .citizen-hero-photo img {
-  width: 194.7826%;
-  height: auto;
-  max-width: none;
-  margin-block-start: -10%;
   display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 38%;
 }
 
 .citizen-hero-waves, .citizen-hero-waves::after {
@@ -125,8 +127,8 @@ body { margin: 0; }
   background: repeating-radial-gradient(ellipse at center, transparent 0 12px, #a5e9c840 13px, transparent 14px);
 }
 
-.citizen-hero-inner { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(26px, 3vw, 44px); align-items: start; padding-block: clamp(34px, 4.25vw, 66px) 38px; }
-.citizen-hero-copy { min-width: 0; padding-block-start: clamp(76px, 7vw, 110px); }
+.citizen-hero-inner { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(26px, 3vw, 44px); align-items: start; padding-block: var(--hero-top-padding) 38px; }
+.citizen-hero-copy { min-width: 0; padding-block-start: calc(var(--hero-photo-height) - var(--hero-top-padding) - 34px); }
 .citizen-service { display: inline-flex; flex-wrap: wrap; gap: 5px 8px; align-items: center; min-height: 33px; padding: 5px 12px; border: 1px solid #b4efc878; border-radius: 999px; color: #edfff6; background: #15463aeb; font-size: 13px; font-weight: 650; }
 .citizen-service span:first-child { width: 8px; height: 8px; border-radius: 50%; background: #66d5ae; box-shadow: 0 0 0 3px #8be0bc20; }
 .citizen-service i { height: 12px; border-inline-start: 1px solid #a9e3c380; }
@@ -249,7 +251,7 @@ body { margin: 0; }
 .citizen-footer .citizen-brand img { width: 33px; height: 33px; }
 .citizen-footer .citizen-brand strong { font-size: 17px; }
 .citizen-footer p { font-size: 13px; max-width: 650px; }
-.citizen-created { margin-inline-start: auto; color: var(--muted); white-space: nowrap; font-size: 13px; }
+.citizen-copyright { margin-inline-start: auto; color: var(--muted); white-space: nowrap; font-size: 13px; }
 .citizen-profile-links { display: flex; flex-wrap: wrap; gap: 12px; }
 
 .citizen-dashboard { display: grid; gap: 22px; padding-block: clamp(26px, 5vw, 64px); }
@@ -327,11 +329,17 @@ body { margin: 0; }
 
 @media (max-width: 900px) {
   .citizen-container { width: min(100% - 44px, 1184px); }
-  .citizen-hero-inner { gap: 28px; padding-block: 46px; }
+  .citizen-hero { --hero-top-padding: 46px; }
+  .citizen-hero-inner { gap: 28px; padding-block-end: 46px; }
   .citizen-issues ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .citizen-form-row { grid-template-columns: 1fr; }
-  .citizen-hero-photo { width: 68vw; }
-  .citizen-hero-copy { padding-block-start: 67px; }
+}
+
+@media (min-width: 691px) {
+  .citizen-hero-inner > .citizen-report {
+    position: relative;
+    inset-inline-start: clamp(12px, calc(4vw - 16px), 32px);
+  }
 }
 
 @media (max-width: 690px) {
@@ -341,9 +349,9 @@ body { margin: 0; }
   .citizen-nav a { font-size: 13px; min-height: 40px; }
   .citizen-actions { gap: 7px; }
   .citizen-account { padding-inline: 7px; font-size: 13px; }
-  .citizen-hero-inner { grid-template-columns: 1fr; padding-block: 34px 25px; gap: 24px; }
-  .citizen-hero-photo { width: 100%; }
-  .citizen-hero-copy { padding-block-start: clamp(18px, 6.5vw, 36px); }
+  .citizen-hero { --hero-photo-height: clamp(225px, 57vw, 390px); --hero-top-padding: 34px; }
+  .citizen-hero-inner { grid-template-columns: 1fr; padding-block-end: 25px; gap: 24px; }
+  .citizen-hero-photo { width: 100%; mask-image: linear-gradient(#000 48%, #000e 62%, #0008 81%, transparent); }
   .citizen-hero-copy h1, .citizen-shell:lang(bn) .citizen-hero-copy h1 { font-size: clamp(39px, 9vw, 53px); }
   .citizen-hero-copy h1 { margin-top: 12px; }
   .citizen-hero-copy > p { margin-top: 12px; }
@@ -355,7 +363,7 @@ body { margin: 0; }
   .citizen-issue-icon { width: 32px; height: 32px; }
   .citizen-issue-icon svg { width: 18px; }
   .citizen-footer-inner { flex-wrap: wrap; gap: 12px; }
-  .citizen-created { margin-inline-start: 0; }
+  .citizen-copyright { margin-inline-start: 0; }
   .citizen-dashboard-actions { grid-template-columns: 1fr; }
   .citizen-dashboard-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .citizen-tracking { padding-block: 28px 45px; }
