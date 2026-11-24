@@ -463,6 +463,38 @@ def test_first_admin_setup_requires_operator_code_and_allows_password_sign_in(mo
     finally:
         engine.dispose()
 
+def test_admin_reset_expires_is_single_use_and_revokes_sessions(monkeypatch):
+    limits.clear()
+    account = {'email': 'reset-owner@example.org', 'password': 'old-admin-password-123'}
+    with SessionLocal() as db:
+        db.add(User(email=account['email'], role='admin', password_hash=hasher.hash(account['password'])))
+        db.commit()
+    now = datetime.now(timezone.utc)
+    code = 'sample-operator-key-for-this-test-only-0001'
+    body = {'code': code, 'password': 'new-admin-password-123'}
+    monkeypatch.setenv('CIVICAI_ADMIN_EMAIL', account['email'])
+    monkeypatch.setenv('CIVICAI_ADMIN_RESET_CODE', code)
+    monkeypatch.setenv('CIVICAI_ADMIN_RESET_EXPIRES', (now - timedelta(minutes=1)).isoformat())
+    path = '/api/auth/admin-reset'
+    with TestClient(app) as client, TestClient(app) as second_session:
+        assert client.get('/api/auth/recovery/options').json()['admin_reset'] is False
+        assert client.post(path, json=body).status_code == 400
+        monkeypatch.setenv('CIVICAI_ADMIN_RESET_EXPIRES', (now + timedelta(minutes=60)).isoformat())
+        monkeypatch.setenv('CIVICAI_ADMIN_SETUP_CODE', code)
+        assert client.get('/api/auth/recovery/options').json()['admin_reset'] is False
+        monkeypatch.delenv('CIVICAI_ADMIN_SETUP_CODE')
+        assert client.get('/api/auth/recovery/options').json()['admin_reset'] is True
+        assert client.post(path, json={**body, 'code': 'x' * 43}).status_code == 400
+        assert client.post(path, json={**body, 'password': 'too-short'}).status_code == 422
+        assert second_session.post('/api/auth/admin/login', json=account).status_code == 200
+        assert client.post(path, json=body).status_code == 200
+        assert client.get('/api/auth/recovery/options').json()['admin_reset'] is False
+        assert second_session.get('/api/auth/me').status_code == 401
+        assert client.post(path, json=body).status_code == 400
+        assert client.post('/api/auth/admin/login', json=account).status_code == 401
+        assert client.post('/api/auth/admin/login', json={**account, 'password': body['password']}).status_code == 200
+
+
 def test_previously_enrolled_admin_can_sign_in_with_existing_password():
     from backend.app.models import AdminMFA
     limits.clear()

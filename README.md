@@ -92,4 +92,6 @@ Administrators sign in through `/admin`. Citizen registration asks for a name, B
 
 The first administrator can activate the configured `CIVICAI_ADMIN_EMAIL` at `/#admin-setup` using the short-lived `CIVICAI_ADMIN_SETUP_CODE` held in the Render service's private environment. Set its absolute UTC deadline via `CIVICAI_ADMIN_SETUP_EXPIRES`. The operator sets a unique password of at least 15 characters. The page disables first-time enrollment once an administrator exists. The local `backend.scripts.create_admin` command remains available to authorized operators.
 
+To reset the existing administrator, generate a fresh `CIVICAI_ADMIN_RESET_CODE` in Render using its secret generator. Set `CIVICAI_ADMIN_RESET_EXPIRES` to an ISO 8601 UTC timestamp within two hours and deploy the environment change. The administrator opens `/#admin-reset`, enters the code from Render and sets a new password of at least 15 characters. A successful reset consumes the code and ends the administrator's existing sessions. Remove the two reset variables after use.
+
 Model output supports review. It does not represent an official or emergency service decision.

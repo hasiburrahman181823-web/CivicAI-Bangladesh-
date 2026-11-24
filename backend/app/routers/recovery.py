@@ -1,8 +1,9 @@
-"""Single-use citizen recovery and operator-authorized administrator setup."""
+"""Citizen recovery and operator-authorized administrator account management."""
 import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from email.utils import parseaddr
@@ -15,8 +16,8 @@ from sqlalchemy.exc import IntegrityError
 
 from ..config import JWT_SECRET, PRODUCTION
 from ..db import SessionLocal, get_db
-from ..models import EmailResetCode, LoginSession, PasswordRecoveryGrant, User
-from ..schemas import AccountEmail, AdminSetup, AdminSetupProof, EmailCodePasswordReset, PasswordReset, RecoveryCodeRequest
+from ..models import AdminResetUse, EmailResetCode, LoginSession, PasswordRecoveryGrant, User
+from ..schemas import AccountEmail, AdminPasswordReset, AdminSetup, AdminSetupProof, EmailCodePasswordReset, PasswordReset, RecoveryCodeRequest
 from ..security import COOKIE, get_session, guarded_password_operation, hasher, throttle
 
 router = APIRouter(prefix="/api/auth", tags=["account recovery"])
@@ -59,13 +60,32 @@ def admin_setup_settings():
     return None
 
 
+def admin_reset_settings():
+    owner = os.getenv("CIVICAI_ADMIN_EMAIL", "").strip().lower()
+    code = os.getenv("CIVICAI_ADMIN_RESET_CODE", "").strip()
+    setup_code = os.getenv("CIVICAI_ADMIN_SETUP_CODE", "").strip()
+    try:
+        expires = datetime.fromisoformat(os.getenv("CIVICAI_ADMIN_RESET_EXPIRES", ""))
+    except ValueError:
+        return None
+    now = datetime.now(timezone.utc)
+    if (owner and re.fullmatch(r"[A-Za-z0-9_+/=-]{43,128}", code) and code != setup_code
+            and expires.utcoffset() is not None and now < expires <= now + timedelta(hours=2)):
+        return owner, digest(code), expires
+    return None
+
+
 @router.get("/recovery/options")
 def recovery_options(db=Depends(get_db)):
     admin_setup_available = (
         admin_setup_settings() is not None
         and db.scalar(select(User.id).where(User.role == "admin").limit(1)) is None
     )
-    return {"email_recovery": mail_settings() is not None, "admin_setup": admin_setup_available}
+    reset = admin_reset_settings()
+    admin_reset_available = (reset is not None and db.get(AdminResetUse, reset[1]) is None
+                             and db.scalar(select(User.id).where(User.email == reset[0], User.role == "admin")) is not None)
+    return {"email_recovery": mail_settings() is not None, "admin_setup": admin_setup_available,
+            "admin_reset": admin_reset_available}
 
 
 def replace_grant(db, user_id, method, code_hash, expires_at=None):
@@ -211,6 +231,26 @@ def finish_password_reset(db, user, password, response):
     db.commit()
     response.delete_cookie(COOKIE, path="/", secure=PRODUCTION, httponly=True, samesite="strict")
     return {"message": "Password updated"}
+
+
+@router.post("/admin-reset")
+def reset_admin_password(data: AdminPasswordReset, request: Request, response: Response, db=Depends(get_db)):
+    throttle(request, "admin-reset", 5)
+    settings = admin_reset_settings()
+    if settings is None or not hmac.compare_digest(settings[1], digest(data.code)):
+        raise HTTPException(400, INVALID_GRANT)
+    email, code_hash, expires = settings
+    user = db.scalar(select(User).where(User.email == email, User.role == "admin").with_for_update())
+    now = datetime.now(timezone.utc)
+    if user is None or now >= expires or db.get(AdminResetUse, code_hash) is not None:
+        raise HTTPException(400, INVALID_GRANT)
+    db.add(AdminResetUse(digest=code_hash, user_id=user.id, used_at=now))
+    try:
+        db.flush()
+        return finish_password_reset(db, user, data.password, response)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, INVALID_GRANT)
 
 
 def setup_email(code):

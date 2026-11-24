@@ -24,6 +24,10 @@ const wording = {
     badSetup: 'অ্যাডমিন সেটআপ কোডটি ভুল অথবা মেয়াদ শেষ হয়েছে।',
     alreadySetup: 'এই সাইটে ইতিমধ্যে একটি অ্যাডমিন অ্যাকাউন্ট চালু আছে।',
     adminPasswordHint: 'অন্তত ১৫ অক্ষরের একটি নতুন, আলাদা পাসওয়ার্ড দিন।',
+    adminReset: 'অ্যাডমিন পাসওয়ার্ড রিসেট',
+    adminResetIntro: 'Render থেকে নেওয়া একবার ব্যবহারযোগ্য রিসেট কোড দিন এবং নতুন পাসওয়ার্ড সেট করুন।',
+    adminResetCode: 'অ্যাডমিন রিসেট কোড',
+    adminResetOff: 'এই মুহূর্তে অ্যাডমিন রিসেট চালু নেই। Render-এ নতুন রিসেট কোড তৈরি করে আবার চেষ্টা করুন।',
   },
   en: {
     forgot: 'Forgot password?', emailIntro: 'Request a password reset code at the email address for your account.',
@@ -45,6 +49,10 @@ const wording = {
     badSetup: 'The administrator setup code is invalid or has expired.',
     alreadySetup: 'An administrator is already set up for this site.',
     adminPasswordHint: 'Use a new, unique password of at least 15 characters.',
+    adminReset: 'Reset administrator password',
+    adminResetIntro: 'Enter the single-use reset code from Render and choose a new password.',
+    adminResetCode: 'Administrator reset code',
+    adminResetOff: 'Administrator reset is unavailable. Generate a new reset code in Render and try again.',
   },
 };
 
@@ -278,6 +286,50 @@ export function FirstAdminSetup({t, language, enabled, onComplete}) {
         <button type="submit" className="citizen-button citizen-submit" disabled={busy}>
           {busy ? t.auth.wait : challenge ? labels.activate : labels.continue}
         </button>
+      </form>}
+  </>;
+}
+
+export function AdminPasswordRecovery({t, language, enabled, onComplete}) {
+  const labels = wording[language];
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState(null);
+  const [done, setDone] = useState(false);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    const fields = new FormData(event.currentTarget);
+    const password = fields.get('password');
+    if (password !== fields.get('confirmation')) {
+      setFailure('mismatch');
+      return;
+    }
+    setBusy(true);
+    setFailure(null);
+    try {
+      await submit('admin-reset', {code: fields.get('code').trim(), password});
+      setDone(true);
+      onComplete();
+    } catch (problem) {
+      setFailure(problem);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
+    <RecoveryHeading title={labels.adminReset} intro={enabled === true && !done ? labels.adminResetIntro : null} admin/>
+    {done ? <div className="citizen-form">
+      <p role="status">{labels.resetDone}</p>
+      <a className="citizen-button citizen-submit" href="#admin">{t.workspace}</a>
+    </div> : enabled !== true ? <p role="status">{enabled === null ? t.auth.wait : labels.adminResetOff}</p>
+      : <form className="citizen-form" onSubmit={handleSubmit}>
+        <label>{labels.adminResetCode}
+          <input name="code" type="password" autoComplete="off" required disabled={busy} minLength={43} maxLength={128}/>
+        </label>
+        <NewPasswordFields t={t} labels={labels} admin busy={busy}/>
+        {failure && <p className="citizen-error" role="alert">{failure === 'mismatch' ? labels.mismatch : message(t, labels, failure, 'invalid')}</p>}
+        <button type="submit" className="citizen-button citizen-submit" disabled={busy}>{busy ? t.auth.wait : labels.reset}</button>
       </form>}
   </>;
 }

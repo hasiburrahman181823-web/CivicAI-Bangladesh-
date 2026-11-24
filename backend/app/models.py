@@ -134,3 +134,10 @@ class PasswordRecoveryGrant(Base):
     method: Mapped[str] = mapped_column(String(16), primary_key=True)
     digest: Mapped[str] = mapped_column(String(64), unique=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+
+
+class AdminResetUse(Base):
+    __tablename__ = "admin_reset_uses"
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

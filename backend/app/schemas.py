@@ -63,6 +63,11 @@ class AdminSetupProof(BaseModel):
 class AdminSetup(AdminSetupProof):
     password: str = Field(min_length=ADMIN_PASSWORD_MINIMUM, max_length=128)
 
+
+class AdminPasswordReset(BaseModel):
+    code: str = Field(pattern=r"^[A-Za-z0-9_+/=-]{43,128}$")
+    password: str = Field(min_length=ADMIN_PASSWORD_MINIMUM, max_length=128)
+
 class TrackingInput(BaseModel):
     tracking_key: str = Field(min_length=1,max_length=128)
 
