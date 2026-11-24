@@ -13,6 +13,20 @@ export async function request(path, options={}) {
   }
   return result;
 }
+
+export async function downloadCSV(path) {
+  const response = await fetch(API + '/api' + path, {credentials: 'include'});
+  if (!response.ok) {
+    const result = await response.json();
+    throw new Error(result.detail || 'The CSV export could not be completed.');
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'civicai-complaints.csv';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 export function ruleAnalysis(text) {
   const lower=text.toLowerCase();
   const groups={Water:['water','পানি','pani','pipe','পাইপ'],Electricity:['electric','বিদ্যুৎ','current','wire'],Road:['road','রাস্তা','rasta','pothole','গর্ত'],Waste:['waste','garbage','বর্জ্য','ময়লা','moyla','drain'],Health:['hospital','হাসপাতাল','স্বাস্থ্য','clinic'],Gas:['gas','গ্যাস'],Safety:['crime','fire','আগুন','চুরি','accident']};

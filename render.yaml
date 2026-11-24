@@ -21,6 +21,8 @@ services:
         value: ""
       - key: DATABASE_URL
         sync: false
+      - key: INTAKE_ENCRYPTION_KEY
+        sync: false
       - key: REDIS_URL
         fromService:
           type: keyvalue

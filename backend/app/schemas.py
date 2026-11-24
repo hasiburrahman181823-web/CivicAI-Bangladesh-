@@ -3,6 +3,7 @@ import unicodedata
 from datetime import datetime, timezone
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
+from .privacy import DIGITS
 
 class AccountEmail(BaseModel):
     email: str = Field(min_length=5, max_length=254)
@@ -70,3 +71,41 @@ class ReviewInput(BaseModel):
     priority: Literal['Low', 'Medium', 'High', 'Critical']
     note: str = Field(min_length=5, max_length=500)
     duplicate_of: str | None = None
+
+
+class ComplaintSubmission(ComplaintInput):
+    mobile: str | None = Field(default=None, max_length=32)
+
+    @field_validator("mobile")
+    @classmethod
+    def normalize_mobile(cls, value):
+        if value is None:
+            return None
+        mobile = re.sub(r"[\s()-]", "", value.translate(DIGITS))
+        if not re.fullmatch(r"(?:\+?88)?01[3-9][0-9]{8}", mobile):
+            raise ValueError("Enter a valid Bangladesh mobile number")
+        return "+88" + mobile[-11:]
+
+
+class FollowupInput(BaseModel):
+    body: str = Field(min_length=2, max_length=1000)
+
+    @field_validator("body")
+    @classmethod
+    def clean_body(cls, value):
+        body = ComplaintInput.clean(value)
+        if len(body) < 2:
+            raise ValueError("Enter a message")
+        return body
+
+
+class ContactAccessInput(BaseModel):
+    reason: str = Field(min_length=10, max_length=300)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value):
+        reason = ComplaintInput.clean(value)
+        if len(reason) < 10:
+            raise ValueError("Enter a reason")
+        return reason

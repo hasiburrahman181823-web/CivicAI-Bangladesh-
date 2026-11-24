@@ -1,25 +1,32 @@
+import csv
 import hashlib
+import io
+import json
+import re
 import secrets
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from argon2.exceptions import VerificationError
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, delete, func
+from sqlalchemy import select, delete, func, or_, literal, union_all, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import ALLOWED_HOSTS, CORS_ORIGINS, PRODUCTION
 from .db import Base, engine, get_db
-from .models import Audit, Complaint, LoginSession, User
-from .schemas import Credentials, ComplaintInput, ReviewInput, TrackingInput
+from .models import AdminExportAudit, Audit, Complaint, ComplaintIntake, LoginSession, TicketEvent, TicketMessage, User
+from .schemas import Credentials, ComplaintInput, ComplaintSubmission, ReviewInput, TrackingInput
 from .services.analysis import analyze, candidate_context, duplicate_candidates
 from .ml.embeddings import load_encoder
 from .ml.predict import ARTIFACTS, benchmark_forecast, load_text
+from .ml.intake import assess, load_intake_model
 from .routers.media import router as media_router
 from .routers.recovery import router as recovery_router
+from .routers.tickets import router as ticket_router
+from .services.intake import masked_contact, seal_intake
 from .privacy import redact_input, redact_contact
 from .security import COOKIE, RequestProtection, configure_limit_store, get_session, guarded_password_operation, hasher, issue_session, limits, session_digest, throttle
 from .ml.integrity import verify_artifacts
@@ -33,9 +40,16 @@ async def lifespan(app):
     global encoder, text_model
     configure_limit_store()
     verify_artifacts(ARTIFACTS)
-    Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        if connection.dialect.name == "postgresql":
+            connection.execute(text("SELECT pg_advisory_xact_lock(81726023)"))
+        Base.metadata.create_all(connection)
+        connection.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_complaints_owner_created ON complaints (owner_id, created_at DESC)"
+        ))
     encoder = load_encoder()
     text_model = load_text()
+    load_intake_model()
     yield
 
 app = FastAPI(title="CivicAI Bangladesh", lifespan=lifespan, docs_url=None,
@@ -47,6 +61,7 @@ app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS,
 app.add_middleware(RequestProtection)
 app.include_router(media_router)
 app.include_router(recovery_router)
+app.include_router(ticket_router)
 
 @app.exception_handler(RequestValidationError)
 async def validation_error(request, error):
@@ -134,9 +149,12 @@ def login(data: Credentials, request: Request, response: Response, db=Depends(ge
         raise HTTPException(401, "Invalid email or password")
     if not user:
         raise HTTPException(401, "Invalid email or password")
+    updated_hash = guarded_password_operation(hasher.hash, data.password) if verified_hash.startswith("$argon2") else None
     user = db.get(User, user.id, with_for_update=True, populate_existing=True)
     if not user or user.password_hash != verified_hash:
         raise HTTPException(401, "Invalid email or password")
+    if updated_hash:
+        user.password_hash = updated_hash
     issue_session(db, user, response, prior_token=request.cookies.get(COOKIE))
     return {"role":user.role,"email":user.email}
 
@@ -160,6 +178,30 @@ def my_complaints(user=Depends(current_user), db=Depends(get_db)):
         reports.append({**row, "created_at": created_at.astimezone(timezone.utc).isoformat()})
     return reports
 
+
+@app.get("/api/auth/me/updates")
+def my_updates(request: Request, user=Depends(current_user), db=Depends(get_db)):
+    throttle(request, "my-updates", 60, identity=str(user.id))
+    status_updates = (
+        select(TicketEvent.id.label("id"), Complaint.id.label("ticket_id"), Complaint.title.label("title"),
+               TicketEvent.created_at.label("created_at"), TicketEvent.status.label("kind"))
+        .join(Complaint, Complaint.id == TicketEvent.complaint_id)
+        .where(Complaint.owner_id == user.id,
+               or_(TicketEvent.status != "Submitted", TicketEvent.created_at > Complaint.created_at))
+    )
+    replies = (
+        select(TicketMessage.id, Complaint.id, Complaint.title, TicketMessage.created_at, literal("reply"))
+        .join(Complaint, Complaint.id == TicketMessage.complaint_id)
+        .where(Complaint.owner_id == user.id, TicketMessage.author_role == "admin")
+    )
+    stream = union_all(status_updates, replies).subquery()
+    return [
+        {**row, "created_at": (row["created_at"].replace(tzinfo=timezone.utc)
+                              if row["created_at"].tzinfo is None else row["created_at"])}
+        for row in db.execute(select(stream).order_by(stream.c.created_at.desc(), stream.c.kind, stream.c.id.desc())
+                              .limit(20)).mappings()
+    ]
+
 @app.post("/api/auth/logout")
 def logout(request: Request, response: Response, db=Depends(get_db)):
     token = request.cookies.get(COOKIE)
@@ -176,18 +218,28 @@ def analysis(data: ComplaintInput, request: Request):
     return analyze(data.text, text_model, data.language, data.occurred_at)
 
 @app.post('/api/complaints')
-def create(data: ComplaintInput, request: Request, db=Depends(get_db)):
+def create(data: ComplaintSubmission, request: Request, db=Depends(get_db)):
     throttle(request, 'submit', 5)
+    user, _ = get_session(request, db, required=False)
+    if not user and not data.mobile:
+        raise HTTPException(422, "A Bangladesh mobile number is required for guest complaints")
+    if not user:
+        throttle(request, "submit-guest-mobile", 3, identity=data.mobile)
     data = redact_input(data)
     tracking_key = secrets.token_urlsafe(24)
     result = analyze(data.text, text_model, data.language, data.occurred_at)
-    item = Complaint(id=str(uuid.uuid4()), tracking_hash=hashlib.sha256(tracking_key.encode()).hexdigest(), **data.model_dump(), category=result['category'], priority=result['priority'], score=result['score'], analysis=result)
-    user, _ = get_session(request, db, required=False)
-    if user:
-        item.owner_id = user.id
+    result["assessment"] = assess(data.title, data.text, result["category"], result["priority"])
+    item = Complaint(id=str(uuid.uuid4()), tracking_hash=hashlib.sha256(tracking_key.encode()).hexdigest(),
+                     owner_id=user.id if user else None, **data.model_dump(exclude={"mobile"}),
+                     category=result["category"], priority=result["priority"], score=result["score"], analysis=result)
     db.add(item)
+    db.flush()
+    db.add(seal_intake(item, data.mobile, request))
+    db.add(TicketEvent(complaint_id=item.id, status=item.status, created_at=item.created_at))
     db.commit()
-    return {**serialize(item), 'tracking_key': tracking_key}
+    response = serialize(item)
+    response["analysis"] = {key: value for key, value in result.items() if key != "assessment"}
+    return {**response, "tracking_key": tracking_key}
 
 @app.post('/api/track/{complaint_id}')
 def track(complaint_id: uuid.UUID, payload: TrackingInput, request: Request, db=Depends(get_db)):
@@ -199,16 +251,76 @@ def track(complaint_id: uuid.UUID, payload: TrackingInput, request: Request, db=
         raise HTTPException(404, "Complaint or tracking key not found")
     return {key: getattr(item,key) for key in ("id","title","category","priority","status","created_at")}
 
+def admin_filters(status: str = Query(default="", max_length=24),
+                  category: str = Query(default="", max_length=32),
+                  area: str = Query(default="", max_length=120),
+                  after: datetime | None = None, before: datetime | None = None,
+                  search: str = Query(default="", max_length=120), review_only: bool = False):
+    if any(value is not None and value.tzinfo is None for value in (after, before)):
+        raise HTTPException(422, "Filters must include timezone information")
+    if after and before and after > before:
+        raise HTTPException(422, "The start date must precede the end date")
+    query = select(Complaint, ComplaintIntake).outerjoin(ComplaintIntake)
+    if status:
+        query = query.where(Complaint.status == status)
+    if review_only:
+        query = query.where(Complaint.status != "Resolved",
+                            Complaint.analysis["requires_review"].as_boolean().is_not(False))
+    if category:
+        query = query.where(Complaint.category == category)
+    if area:
+        query = query.where(Complaint.area.icontains(area, autoescape=True))
+    if after:
+        query = query.where(Complaint.occurred_at >= after.astimezone(timezone.utc))
+    if before:
+        query = query.where(Complaint.occurred_at <= before.astimezone(timezone.utc))
+    if search:
+        query = query.where(or_(*(field.icontains(search, autoescape=True)
+                                  for field in (Complaint.title, Complaint.text, Complaint.area, Complaint.id))))
+    return query.order_by(Complaint.created_at.desc(), Complaint.id.desc())
+
+
 @app.get('/api/admin/complaints')
-def all_complaints(user=Depends(admin), db=Depends(get_db)):
-    return [serialize(item) for item in db.scalars(recent_complaints())]
+def all_complaints(query=Depends(admin_filters), offset: int = Query(default=0, ge=0),
+                   limit: int = Query(default=500, ge=1, le=500), user=Depends(admin), db=Depends(get_db)):
+    return [{**serialize(item), "intake": masked_contact(intake)}
+            for item, intake in db.execute(query.offset(offset).limit(limit))]
+
+
+def csv_cell(value):
+    text = str(value if value is not None else "")
+    return "'" + text if re.match(r"^[\s\u200b-\u200f]*[=+@\-]|^[\t\r\n]", text) else text
+
+
+@app.get('/api/admin/complaints/export')
+def export_complaints(request: Request, offset: int = Query(default=0, ge=0),
+                      query=Depends(admin_filters), user=Depends(admin), db=Depends(get_db)):
+    throttle(request, "admin-export", 6, identity=str(user.id))
+    reports = db.execute(query.offset(offset).limit(5001)).all()
+    if len(reports) > 5000:
+        raise HTTPException(422, "Filter the report to 5000 complaints or fewer")
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(("Tracking ID", "Title", "Area", "Incident time", "Submission time", "Category",
+                     "Priority", "Status", "Language", "Masked mobile", "Mobile verified", "Review flags"))
+    for item, intake in reports:
+        contact = masked_contact(intake) or {}
+        flags = (item.analysis.get("assessment") or {}).get("flags", [])
+        writer.writerow(map(csv_cell, (item.id, item.title, item.area, item.occurred_at, item.created_at,
+                                       item.category, item.priority, item.status, item.language,
+                                       contact.get("mobile"), contact.get("verified"), ", ".join(flags))))
+    db.add(AdminExportAudit(actor_id=user.id, count=len(reports)))
+    db.commit()
+    return Response("\ufeff" + output.getvalue(), media_type="text/csv", headers={
+        "Content-Disposition": 'attachment; filename="civicai-complaints.csv"',
+    })
 
 def recent_complaints():
     return select(Complaint).order_by(Complaint.created_at.desc(), Complaint.id.desc()).limit(500)
 
 @app.patch('/api/admin/complaints/{complaint_id}')
 def review(complaint_id: str, data: ReviewInput, user=Depends(admin), db=Depends(get_db)):
-    item = db.get(Complaint, complaint_id)
+    item = db.get(Complaint, complaint_id, with_for_update=True)
     if not item:
         raise HTTPException(404, 'Complaint not found')
     if data.duplicate_of:
@@ -219,13 +331,15 @@ def review(complaint_id: str, data: ReviewInput, user=Depends(admin), db=Depends
             raise HTTPException(400, 'The selected incident has incompatible location, time or status')
         if db.scalar(select(Complaint).where(Complaint.duplicate_of == item.id)):
             raise HTTPException(400, 'Move existing linked reports before linking this incident')
+    if item.status != data.status:
+        db.add(TicketEvent(complaint_id=item.id, status=data.status))
     for key in ['status', 'priority', 'duplicate_of']:
         setattr(item, key, getattr(data, key))
     note = redact_contact(data.note)
     item.analysis = {**item.analysis, 'requires_review': False, 'review_note': note}
     db.add(Audit(actor_id=user.id, complaint_id=item.id, action=data.model_copy(update={'note':note}).model_dump_json()))
     db.commit()
-    return serialize(item)
+    return {**serialize(item), "intake": masked_contact(db.get(ComplaintIntake, item.id))}
 
 @app.get('/api/admin/duplicates/{complaint_id}')
 def duplicates(complaint_id: str, request: Request, user=Depends(admin), db=Depends(get_db)):
@@ -237,7 +351,16 @@ def duplicates(complaint_id: str, request: Request, user=Depends(admin), db=Depe
 
 @app.get('/api/admin/audit')
 def audit(user=Depends(admin), db=Depends(get_db)):
-    return [{'id': x.id, 'complaint_id': x.complaint_id, 'action': x.action, 'created_at': x.created_at} for x in db.scalars(select(Audit).order_by(Audit.id.desc()).limit(100))]
+    events = [
+        {"id": row.id, "complaint_id": row.complaint_id, "actor_id": row.actor_id,
+         "action": row.action, "created_at": row.created_at}
+        for row in db.scalars(select(Audit).order_by(Audit.id.desc()).limit(100))
+    ]
+    events.extend({
+        "id": f"export-{row.id}", "complaint_id": None, "actor_id": row.actor_id,
+        "action": json.dumps({"event": "complaint_export", "count": row.count}), "created_at": row.created_at,
+    } for row in db.scalars(select(AdminExportAudit).order_by(AdminExportAudit.id.desc()).limit(100)))
+    return sorted(events, key=lambda event: event["created_at"], reverse=True)[:100]
 
 # Mount only after API routes, so the bundled production frontend shares the origin.
 from pathlib import Path

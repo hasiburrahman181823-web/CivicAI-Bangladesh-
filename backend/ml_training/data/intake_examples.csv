@@ -1,0 +1,48 @@
+language,sentiment,risk,text
+English,negative,ordinary,The electricity has been out for two days and I am very frustrated
+English,negative,ordinary,The repeated delays and flooded road have made commuting miserable
+English,negative,ordinary,Our water still smells rotten and the children are getting sick
+Bangla,negative,ordinary,দুই দিন ধরে পানি নেই খুব কষ্ট হচ্ছে
+Bangla,negative,ordinary,এই ভাঙা রাস্তা নিয়ে আমরা খুব হতাশ
+Bangla,negative,ordinary,বারবার অভিযোগ করেও ময়লা সরানো হয়নি
+Banglish,negative,ordinary,Tin din dhore current nai amra onek koshto pacchi
+Banglish,negative,ordinary,Pani nai ar durgondhe amra khub birokto
+Banglish,negative,ordinary,Rastar obostha kharap ageo bolechi kono kaj hoy nai
+English,neutral,ordinary,There is a pothole beside the school gate on the main road
+English,neutral,ordinary,The street light near the bridge has stopped working
+English,neutral,ordinary,Please inspect the damaged water pipe at the market
+English,neutral,ordinary,Two garbage containers are full near the bus stop
+Bangla,neutral,ordinary,স্কুলের গেটের কাছে রাস্তার মাঝখানে একটি গর্ত আছে
+Bangla,neutral,ordinary,বাজারের পশ্চিম দিকে একটি পানির পাইপ ফেটে গেছে
+Bangla,neutral,ordinary,হাসপাতালের সামনে নর্দমার ঢাকনা নেই
+Banglish,neutral,ordinary,Bazarer pasher rastay boro gorto ache
+Banglish,neutral,ordinary,School er samne drain er dhakna nai
+Banglish,neutral,ordinary,Bridge er pasher street light noshto
+English,positive,ordinary,Thank you for fixing the drain so quickly
+English,positive,ordinary,I appreciate the fast response from the road repair team
+English,positive,ordinary,The repairs helped the whole neighbourhood thank you
+Bangla,positive,ordinary,দ্রুত রাস্তা মেরামত করার জন্য ধন্যবাদ
+Bangla,positive,ordinary,সমস্যার দ্রুত সমাধানে আমরা খুশি
+Bangla,positive,ordinary,পরিষ্কার করার জন্য কর্মীদের ধন্যবাদ জানাই
+Banglish,positive,ordinary,Onek dhonnobad rasta ekhon thik hoyeche
+Banglish,positive,ordinary,Khub taratari kaj korar jonno dhonnobad
+Banglish,positive,ordinary,Drain thik hoyeche amra khushi
+English,neutral,promotion,Claim your free lottery prize click here and subscribe today
+English,neutral,promotion,Guaranteed profits buy our premium investment offer today
+English,neutral,promotion,Win cash instantly using this referral code
+English,neutral,promotion,Subscribe now for the best discount click here to claim your offer
+Bangla,neutral,promotion,ফ্রি লটারি পুরস্কার পেতে এখনই লিংকে ক্লিক করুন
+Bangla,neutral,promotion,ছাড়ের অফার নিতে এখনই সাবস্ক্রাইব করুন
+Bangla,neutral,promotion,নিশ্চিত টাকা জিততে আমাদের রেফারেল কোড ব্যবহার করুন
+Banglish,neutral,promotion,Free taka pete link e click korun offer ajkei sesh
+Banglish,neutral,promotion,Lottery prize claim korte referral code din
+Banglish,neutral,promotion,Discount offer nite ekhon subscribe korun
+English,negative,abusive,I will come and beat you up you worthless bastard
+English,negative,abusive,You disgusting scum I will hurt your family
+English,negative,abusive,You are worthless and I will smash your face
+Bangla,negative,abusive,তোকে মারব তুই একটা জঘন্য জানোয়ার
+Bangla,negative,abusive,তোকে দেখে নেব তোর বাড়িতে এসে আঘাত করব
+Bangla,negative,abusive,তোর মাথা ফাটিয়ে দেব তুই একটা নোংরা জানোয়ার
+Banglish,negative,abusive,Toke marbo tui ekta joghonno janowar
+Banglish,negative,abusive,Tor bari giye toke pitabo
+Banglish,negative,abusive,Toke dhore matha fatiye debo

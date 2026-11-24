@@ -107,7 +107,7 @@ body { margin: 0; }
   pointer-events: none;
 }
 
-.citizen-hero-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.04fr); gap: clamp(36px, 6.1vw, 98px); align-items: center; padding-block: 66px; }
+.citizen-hero-inner { display: grid; grid-template-columns: minmax(0, .92fr) minmax(0, 1.08fr); gap: clamp(32px, 5vw, 76px); align-items: center; padding-block: clamp(40px, 5.5vw, 80px); }
 .citizen-hero-copy { min-width: 0; padding: 14px 0; }
 .citizen-service { display: inline-flex; gap: 9px; align-items: center; min-height: 33px; padding: 5px 12px; border: 1px solid #b4efc846; border-radius: 999px; color: #d2f4dc; background: #dcf8df0d; font-size: 13px; font-weight: 700; }
 .citizen-service span:first-child { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 0 4px #b4efc826; }
@@ -128,7 +128,10 @@ body { margin: 0; }
 .citizen-assurance div > span { color: #cce6d5; font-size: 13px; margin-top: 3px; }
 
 .citizen-card { border: 1px solid var(--border); border-radius: 21px; padding: clamp(23px, 3vw, 36px); color: var(--ink); background: var(--card); }
-.citizen-report { scroll-margin-top: 20px; box-shadow: 0 18px 54px #041d1a3b; min-width: 0; }
+.citizen-report {
+  scroll-margin-top: 20px; box-shadow: 0 20px 60px #041d1a4f; min-width: 0;
+  border-top: 4px solid #85ceaa;
+}
 .citizen-card-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 22px; }
 .citizen-card-icon { display: grid; place-items: center; width: 45px; height: 45px; flex: none; color: var(--brand); background: var(--tint); border-radius: 10px; }
 .citizen-card-header h1, .citizen-card-header h2, .citizen-dialog h2 { font-size: clamp(24px, 2.5vw, 32px); font-weight: 800; line-height: 1.16; letter-spacing: -.035em; color: var(--ink); }
@@ -164,7 +167,8 @@ body { margin: 0; }
 .citizen-issues { padding: 37px 0 46px; }
 .citizen-issues h2 { font-size: clamp(24px, 2.4vw, 33px); line-height: 1.2; font-weight: 800; letter-spacing: -.035em; }
 .citizen-issues ul { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; list-style: none; padding: 0; margin: 19px 0 0; }
-.citizen-issues li { display: flex; align-items: flex-start; gap: 11px; padding: 15px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+.citizen-issues li { display: flex; align-items: flex-start; gap: 12px; padding: 18px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 15px; transition: border-color .18s ease, box-shadow .18s ease; }
+.citizen-issues li:hover { border-color: var(--brand); box-shadow: 0 4px 18px #052e2110; }
 .citizen-issue-icon { display: grid; place-items: center; color: var(--brand); border-radius: 8px; background: var(--tint); width: 39px; height: 39px; flex: none; }
 .citizen-issues h3 { font-weight: 750; font-size: 15px; line-height: 1.25; }
 .citizen-issues p { font-size: 13px; line-height: 1.45; color: var(--muted); margin-top: 4px; }

@@ -83,11 +83,18 @@ export function ReviewAudit({preview}) {
 function AuditEntry({entry, t, format}) {
   let action;
   try { action = JSON.parse(entry.action); } catch { action = null; }
+  const eventLabel = {
+    complaint_export: 'CSV export', contact_access: 'Contact data accessed',
+    evidence_download: 'Evidence downloaded', ticket_reply: 'Reply sent',
+  }[action?.event] || 'Review recorded';
   return <li>
-    <strong>{action?.status ? t(action.status) : t('Review recorded')}{action?.priority && ' · ' + t(action.priority)}</strong>
+    <strong>{action?.status ? t(action.status) : t(eventLabel)}{action?.priority && ' · ' + t(action.priority)}</strong>
     <time dateTime={entry.created_at}>{format.format(utcDate(entry.created_at))}</time>
-    <small>{t('Complaint ID')} · {entry.complaint_id}</small>
+    {entry.complaint_id && <small>{t('Complaint ID')} · {entry.complaint_id}</small>}
+    {entry.actor_id && <small>{t('Administrator ID')} · {entry.actor_id}</small>}
+    {action?.count != null && <small>{t('{count} records', {count: action.count})}</small>}
     {action?.note && <p>{action.note}</p>}
+    {action?.reason && <p>{action.reason}</p>}
     {action?.duplicate_of && <small>{t('Linked complaint')} · {action.duplicate_of}</small>}
   </li>;
 }

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, Float, DateTime, JSON, ForeignKey
+from sqlalchemy import String, Text, Float, DateTime, JSON, ForeignKey, LargeBinary, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 
@@ -33,12 +33,58 @@ class Complaint(Base):
     analysis: Mapped[dict] = mapped_column(JSON)
     duplicate_of: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
+
+class ComplaintIntake(Base):
+    __tablename__ = "complaint_intake"
+    complaint_id: Mapped[str] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"), primary_key=True)
+    sealed_data: Mapped[bytes] = mapped_column(LargeBinary)
+    mobile_last4: Mapped[str | None] = mapped_column(String(4))
+    mobile_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+
+
+class TicketMessage(Base):
+    __tablename__ = "ticket_messages"
+    __table_args__ = (Index("ix_ticket_messages_complaint_order", "complaint_id", "id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    complaint_id: Mapped[str] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"))
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    author_role: Mapped[str] = mapped_column(String(16))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class TicketEvent(Base):
+    __tablename__ = "ticket_events"
+    __table_args__ = (Index("ix_ticket_events_complaint_order", "complaint_id", "id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    complaint_id: Mapped[str] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"))
+    status: Mapped[str] = mapped_column(String(24))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class TicketEvidence(Base):
+    __tablename__ = "ticket_evidence"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    complaint_id: Mapped[str] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"), index=True)
+    image: Mapped[bytes] = mapped_column(LargeBinary)
+    size: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
 class Audit(Base):
     __tablename__ = 'audits'
     id: Mapped[int] = mapped_column(primary_key=True)
     actor_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
     complaint_id: Mapped[str] = mapped_column(String(36))
     action: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
+
+class AdminExportAudit(Base):
+    __tablename__ = "admin_export_audits"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    actor_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    count: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 class LoginSession(Base):

@@ -2,6 +2,8 @@
 
 CivicAI is a citizen complaint decision-support prototype. It accepts Bangla, English and Banglish text, suggests a category and severity, and explains how severity and policy cues contribute to suggested priority. Reviewers confirm all priority and duplicate decisions.
 
+The [ticket system architecture and setup](docs/ticket-system.md) covers guest intake, citizen accounts, evidence, staff review, and the NLP training pipeline.
+
 ## Project layout
 
 ```text

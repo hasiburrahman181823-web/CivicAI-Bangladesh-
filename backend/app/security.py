@@ -1,22 +1,26 @@
 """Request boundaries and signed, revocable login sessions."""
+import base64
 import hashlib
 import hmac
 import secrets
 import time
 import anyio
+import bcrypt
 import jwt
 from collections import OrderedDict, deque
 from datetime import datetime, timedelta, timezone
+from ipaddress import ip_address
 from threading import BoundedSemaphore, Lock
 from urllib.parse import urlsplit
 
 from argon2 import PasswordHasher
+from argon2.exceptions import VerificationError
 from fastapi import HTTPException, Request
 from sqlalchemy import delete
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.responses import JSONResponse
 
-from .config import CORS_ORIGINS, JWT_SECRET, PRODUCTION, REDIS_URL
+from .config import CORS_ORIGINS, JWT_SECRET, PRODUCTION, REDIS_URL, TRUSTED_PROXY_NETWORKS
 from .models import LoginSession, User
 
 COOKIE = "__Host-civicai" if PRODUCTION else "civicai_session"
@@ -25,8 +29,36 @@ SESSION_AUDIENCE = "civicai-web"
 limits = OrderedDict()
 limit_lock = Lock()
 redis_client = None
-hasher = PasswordHasher()
 password_slots = BoundedSemaphore(2)
+
+
+class AccountPasswordHasher:
+    prefix = "bcrypt-sha256:"
+
+    def __init__(self):
+        self.legacy = PasswordHasher()
+
+    @staticmethod
+    def bcrypt_input(password):
+        digest = hashlib.sha256(b"CivicAI account password\x00" + password.encode("utf-8")).digest()
+        return base64.urlsafe_b64encode(digest)
+
+    def hash(self, password):
+        return self.prefix + bcrypt.hashpw(self.bcrypt_input(password), bcrypt.gensalt(rounds=12)).decode()
+
+    def verify(self, stored, password):
+        if stored.startswith("$argon2"):
+            return self.legacy.verify(stored, password)
+        if stored.startswith(self.prefix):
+            try:
+                if bcrypt.checkpw(self.bcrypt_input(password), stored[len(self.prefix):].encode()):
+                    return True
+            except ValueError:
+                pass
+        raise VerificationError("Invalid password")
+
+
+hasher = AccountPasswordHasher()
 
 
 def guarded_password_operation(function, *args):
@@ -44,8 +76,30 @@ def configure_limit_store():
         redis_client = redis.Redis.from_url(REDIS_URL, socket_timeout=1.0, socket_connect_timeout=1.0)
         redis_client.ping()
 
+def client_address(request):
+    try:
+        peer = ip_address(request.client.host) if request.client else None
+    except ValueError:
+        return None
+    if peer is None:
+        return None
+    if not any(peer in network for network in TRUSTED_PROXY_NETWORKS):
+        return str(peer)
+    headers = request.headers.getlist("x-forwarded-for")
+    if sum(map(len, headers)) > 1024:
+        return str(peer)
+    for entry in reversed(",".join(headers).split(",")):
+        try:
+            address = ip_address(entry.strip())
+        except ValueError:
+            return str(peer)
+        if not any(address in network for network in TRUSTED_PROXY_NETWORKS):
+            return str(address)
+    return str(peer)
+
+
 def throttle(request: Request, action: str, maximum: int, identity: str | None = None):
-    client = identity if identity is not None else (request.client.host if request.client else "unknown")
+    client = identity if identity is not None else client_address(request) or "unknown"
     name = hmac.new(JWT_SECRET.encode(), f"{action}:{client}".encode(), hashlib.sha256).hexdigest()
     if redis_client is not None:
         from redis.exceptions import RedisError
@@ -171,8 +225,9 @@ class RequestProtection:
                     return await reject(403, "Origin is not allowed")
             if headers.get("sec-fetch-site") == "cross-site":
                 return await reject(403, "Cross-site writes are blocked")
-            media = path.startswith("/api/media/")
-            cap = 9*1024*1024 if media else 24*1024
+            ticket_upload = path.startswith("/api/tickets/") and path.endswith("/evidence")
+            media = path.startswith("/api/media/") or ticket_upload
+            cap = (2*1024*1024 + 16*1024) if ticket_upload else (9*1024*1024 if media else 24*1024)
             declared = headers.getlist("content-length")
             if declared and (len(declared) != 1 or not declared[0].isascii() or not declared[0].isdigit()
                              or len(declared[0]) > 9 or int(declared[0]) > cap):

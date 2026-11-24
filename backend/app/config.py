@@ -1,5 +1,6 @@
 import os
 import secrets
+from ipaddress import ip_network
 
 ENVIRONMENT = os.getenv('ENVIRONMENT', 'development').strip().lower()
 JWT_SECRET = os.getenv('JWT_SECRET', '')
@@ -15,11 +16,17 @@ PRODUCTION = ENVIRONMENT.strip().lower() == "production"
 if PRODUCTION and (len(JWT_SECRET) < 32 or not os.getenv("JWT_SECRET")):
     raise RuntimeError("Production requires an explicit JWT_SECRET.")
 REDIS_URL = os.getenv("REDIS_URL", "")
+TRUSTED_PROXY_NETWORKS = tuple(ip_network(value.strip()) for value in
+                               os.getenv("TRUSTED_PROXY_NETWORKS", "").split(",") if value.strip())
+if any(network.prefixlen == 0 for network in TRUSTED_PROXY_NETWORKS):
+    raise RuntimeError("Use specific trusted proxy addresses or CIDRs.")
 ALLOWED_HOSTS = [name.strip() for name in os.getenv(
     "ALLOWED_HOSTS", "localhost,127.0.0.1,testserver" if not PRODUCTION else ""
 ).split(",") if name.strip()]
 CORS_ORIGINS = [x.strip() for x in CORS_ORIGINS if x.strip()]
 if PRODUCTION:
+    if not DATABASE_URL.startswith("postgresql+psycopg://"):
+        raise RuntimeError("Use PostgreSQL for the production database.")
     if not ALLOWED_HOSTS or any("*" in host or "/" in host for host in ALLOWED_HOSTS):
         raise RuntimeError("Set exact ALLOWED_HOSTS for production.")
     if any(not origin.startswith("https://") for origin in CORS_ORIGINS):

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import {request} from '../api/client';
 import {MediaTools} from '../components/ModelTools';
+import {TicketActivity} from '../components/TicketActivity';
 import {FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
 import {PublicDashboard} from './PublicDashboard';
 import {copy} from './copy';
@@ -16,7 +17,7 @@ const Workspace = lazy(() => import('../Workspace'));
 const launchYear = 2026;
 const issueIcons = [Construction, Droplets, Trash2, Zap];
 const languages = ['Bangla', 'English', 'Banglish'];
-const emptyForm = {title: '', area: '', text: '', time: '', language: '', latitude: '', longitude: ''};
+const emptyForm = {title: '', area: '', text: '', time: '', language: '', latitude: '', longitude: '', mobile: ''};
 const isPreview = import.meta.env.VITE_UI_PREVIEW === '1';
 
 function errorCopy(t, problem, context) {
@@ -183,7 +184,8 @@ export function CitizenPortal() {
                 </div>
               </div>
               <section className="citizen-card citizen-report" id="report" tabIndex={-1} ref={reportPanel} aria-label={t.formTitle}>
-                <ComplaintForm t={t} language={language} onTrack={trackReport} models={models}/>
+                <ComplaintForm t={t} language={language} onTrack={trackReport} models={models}
+                  session={session} checkingSession={checkingSession} onExpired={() => setSession(null)}/>
               </section>
             </div>
           </section>
@@ -280,7 +282,7 @@ function CardHeader({Icon, title, intro, headingRef, primaryHeading = false}) {
   </div>;
 }
 
-function ComplaintForm({t, language, onTrack, models}) {
+function ComplaintForm({t, language, onTrack, models, session, checkingSession, onExpired}) {
   const [form, setForm] = useState(emptyForm);
   const [receipt, setReceipt] = useState(null);
   const [action, setAction] = useState(null);
@@ -290,6 +292,13 @@ function ComplaintForm({t, language, onTrack, models}) {
   const busy = action !== null;
   const number = new Intl.NumberFormat(language === 'bn' ? 'bn-BD' : 'en-GB');
   const complaintLanguage = form.language || (/[\u0980-\u09ff]/.test(form.text) ? 'Bangla' : form.text.trim() ? 'English' : language === 'bn' ? 'Bangla' : 'English');
+  const mobile = language === 'bn' ? {
+    label: 'বাংলাদেশি মোবাইল নম্বর', bad: 'অভিযোগ জমা দিতে সঠিক বাংলাদেশি মোবাইল নম্বর দিন।',
+    hint: 'অতিথির অভিযোগ যাচাইয়ের প্রয়োজনে নম্বরটি এনক্রিপ্ট করে রাখা হয়। শুধু অনুমোদিত পর্যালোচক পুরো নম্বর দেখতে পারবেন।',
+  } : {
+    label: 'Bangladesh mobile number', bad: 'Enter a valid Bangladesh mobile number to submit as a guest.',
+    hint: 'We encrypt this number for complaint review. Only authorized reviewers can see the full number.',
+  };
 
   useEffect(() => { if (receipt) receiptHeading.current?.focus(); }, [receipt]);
 
@@ -302,7 +311,7 @@ function ComplaintForm({t, language, onTrack, models}) {
 
   async function submit(event) {
     event.preventDefault();
-    if (isPreview || busy) return;
+    if (isPreview || busy || checkingSession) return;
     const {title, area, text, latitude, longitude} = form;
     if (title.trim().length < 5 || area.trim().length < 2 || text.trim().length < 10) {
       setError('shortReport');
@@ -318,6 +327,11 @@ function ComplaintForm({t, language, onTrack, models}) {
       return;
     }
     const previewing = event.nativeEvent.submitter?.value === 'suggest';
+    const normalizedMobile = form.mobile.replace(/[০-৯]/g, digit => String(digit.charCodeAt(0) - 2534)).replace(/[\s()-]/g, '');
+    if (!previewing && !session && !/^(?:\+?88)?01[3-9][0-9]{8}$/.test(normalizedMobile)) {
+      setError('mobile');
+      return;
+    }
     setAction(previewing ? 'suggest' : 'submit');
     setError(null);
     try {
@@ -328,6 +342,7 @@ function ComplaintForm({t, language, onTrack, models}) {
           occurred_at: date.toISOString(), language: complaintLanguage,
           latitude: latitude === '' ? null : Number(latitude),
           longitude: longitude === '' ? null : Number(longitude),
+          ...(!previewing && !session ? {mobile: normalizedMobile} : {}),
         }),
       });
       if (previewing) {
@@ -339,7 +354,10 @@ function ComplaintForm({t, language, onTrack, models}) {
       setForm(emptyForm);
       setSuggestion(null);
     } catch (problem) {
-      setError(problem);
+      if (problem.message === 'A Bangladesh mobile number is required for guest complaints') {
+        onExpired();
+        setError('mobile');
+      } else setError(problem);
     } finally {
       setAction(null);
     }
@@ -382,6 +400,12 @@ function ComplaintForm({t, language, onTrack, models}) {
         <textarea name="text" value={form.text} onChange={change} placeholder={t.detailsPlaceholder} minLength={10} maxLength={1000} rows={3} required disabled={busy}/>
         <small className="citizen-counter">{number.format(form.text.length)} / {number.format(1000)}</small>
       </label>
+      {!session && !checkingSession && <label className="guest-mobile">{mobile.label}
+        <input name="mobile" type="tel" inputMode="tel" autoComplete="tel" value={form.mobile}
+          onChange={change} placeholder="01XXXXXXXXX" maxLength={32} required disabled={busy}
+          aria-invalid={error === 'mobile' ? true : undefined} aria-describedby="guest-mobile-note"/>
+        <small id="guest-mobile-note">{mobile.hint}</small>
+      </label>}
       <details className="citizen-optional">
         <summary>{t.extra}<span>{t.optional}</span></summary>
         <div className="citizen-form-row">
@@ -401,11 +425,11 @@ function ComplaintForm({t, language, onTrack, models}) {
         </div>
         <small>{t.coordinateHint}</small>
       </details>
-      {error && <p className="citizen-error" role="alert">{typeof error === 'string' ? t[error] : errorCopy(t, error, 'report')}</p>}
-      <button className="citizen-button citizen-submit" type="submit" value="submit" disabled={busy || isPreview}>
+      {error && <p className="citizen-error" role="alert">{error === 'mobile' ? mobile.bad : typeof error === 'string' ? t[error] : errorCopy(t, error, 'report')}</p>}
+      <button className="citizen-button citizen-submit" type="submit" value="submit" disabled={busy || isPreview || checkingSession}>
         <span>{action === 'submit' ? t.sending : t.send}</span><ArrowRight size={19} aria-hidden="true"/>
       </button>
-      <button className="citizen-text-button" type="submit" value="suggest" disabled={busy || isPreview}>{action === 'suggest' ? t.checking : t.checkSuggestion}</button>
+      <button className="citizen-text-button" type="submit" value="suggest" formNoValidate disabled={busy || isPreview || checkingSession}>{action === 'suggest' ? t.checking : t.checkSuggestion}</button>
       {suggestion && <TriageSuggestion result={suggestion} t={t} language={language} number={number}/>}
     </form>
     {(models?.voice || models?.image) && <MediaTools
@@ -494,13 +518,42 @@ function CitizenProfile({t, language, session, onSignOut, onExpired}) {
   const [items, setItems] = useState(null);
   const [error, setError] = useState(null);
   const [attempt, setAttempt] = useState(0);
+  const [activeTicket, setActiveTicket] = useState(null);
+  const [updates, setUpdates] = useState([]);
+  const words = language === 'bn' ? {
+    updates: 'সাম্প্রতিক হালনাগাদ', reply: 'পর্যালোচনা দলের উত্তর', noUpdates: 'নতুন কোনো হালনাগাদ নেই।',
+  } : {updates: 'Recent updates', reply: 'Reply from the review team', noUpdates: 'No updates yet.'};
 
   useEffect(() => {
     const controller = new AbortController();
-    request('/auth/me/complaints', {signal: controller.signal})
-      .then(items => { if (!controller.signal.aborted) setItems(items); })
-      .catch(error => { if (!controller.signal.aborted) setError(error); });
-    return () => controller.abort();
+    let running = false;
+    async function refresh() {
+      if (running || document.visibilityState === 'hidden') return;
+      running = true;
+      try {
+        const [reports, activity] = await Promise.all([
+          request('/auth/me/complaints', {signal: controller.signal}),
+          request('/auth/me/updates', {signal: controller.signal}),
+        ]);
+        if (!controller.signal.aborted) {
+          setItems(reports);
+          setUpdates(activity);
+          setError(null);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted) setError(error);
+      } finally {
+        running = false;
+      }
+    }
+    refresh();
+    const timer = window.setInterval(refresh, 20000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, [attempt]);
 
   const dateFormat = new Intl.DateTimeFormat(language === 'bn' ? 'bn-BD' : 'en-GB', {
@@ -530,14 +583,27 @@ function CitizenProfile({t, language, session, onSignOut, onExpired}) {
         ? <p>{t.profile.empty}</p>
         : <ul className="citizen-profile-list">
           {items.map(item => <li key={item.id}>
-            <div><strong>{item.title}</strong>
+            <div><button type="button" className="ticket-list-button" aria-pressed={activeTicket === item.id}
+              onClick={() => setActiveTicket(current => current === item.id ? null : item.id)}>{item.title}</button>
               <small>{item.area} · <time dateTime={item.created_at}>{dateFormat.format(new Date(item.created_at))}</time></small>
             </div>
             <span>{t.status[item.status] || item.status}</span>
           </li>)}
         </ul>}
+      {activeTicket && <TicketActivity key={activeTicket} id={activeTicket} language={language}/>}
       <a className="citizen-text-button" href="#report">{t.report}<ArrowRight size={16} aria-hidden="true"/></a>
     </section>
+    {!error && items !== null && <section className="citizen-profile-complaints">
+      <h2>{words.updates}</h2>
+      {updates.length ? <ul className="citizen-profile-list" aria-live="polite">
+        {updates.slice(0, 5).map(entry => <li key={entry.kind + entry.id}>
+          <div><button type="button" className="ticket-list-button"
+            onClick={() => setActiveTicket(entry.ticket_id)}>{entry.title}</button>
+            <small>{entry.kind === 'reply' ? words.reply : t.status[entry.kind]}</small></div>
+          <time dateTime={entry.created_at}>{dateFormat.format(new Date(entry.created_at))}</time>
+        </li>)}
+      </ul> : <p>{words.noUpdates}</p>}
+    </section>}
     {session.role === 'citizen' && <RecoveryCode t={t} language={language}/>}
   </>;
 }
