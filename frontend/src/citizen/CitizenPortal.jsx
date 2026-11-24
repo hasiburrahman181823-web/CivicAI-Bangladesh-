@@ -210,7 +210,7 @@ export function CitizenPortal() {
         <div hidden={dashboard || tracking || profile || admin || recovering || settingUpAdmin}>
           <section className="citizen-hero">
             <div className="citizen-hero-photo" aria-hidden="true">
-              <img src="/civicai-hero.webp" width="1536" height="1024" alt="" fetchPriority={route === '#home' || !route ? 'high' : 'auto'}/>
+              <img src="/civicai-help-desk.webp" width="1536" height="1024" alt="" fetchPriority={route === '#home' || !route ? 'high' : 'auto'}/>
             </div>
             <div className="citizen-hero-waves" aria-hidden="true"/>
             <div className="citizen-container citizen-hero-inner">
@@ -346,8 +346,28 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
 
   async function submit(event, previewing = false) {
     event.preventDefault();
-    if (isPreview || busy || checkingSession) return;
+    if (isPreview || busy || (!previewing && checkingSession)) return;
     const {title, area, text, latitude, longitude} = form;
+    if (previewing) {
+      if (text.trim().length < 5) {
+        setError('suggestionText');
+        return;
+      }
+      setAction('suggest');
+      setError(null);
+      setSuggestion(null);
+      try {
+        setSuggestion(await request('/analyze', {
+          method: 'POST',
+          body: JSON.stringify({text: text.trim(), language: complaintLanguage}),
+        }));
+      } catch (problem) {
+        setError(problem);
+      } finally {
+        setAction(null);
+      }
+      return;
+    }
     if (title.trim().length < 5 || area.trim().length < 2 || text.trim().length < 10) {
       setError('shortReport');
       return;
@@ -361,15 +381,15 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
       setError('coordinatePair');
       return;
     }
-    if (!previewing && (!session || form.mobile.trim()) && !validMobile) {
+    if ((!session || form.mobile.trim()) && !validMobile) {
       setError('mobileError');
       return;
     }
-    if (!previewing && evidence && !validEvidence(evidence)) {
+    if (evidence && !validEvidence(evidence)) {
       setError('evidenceError');
       return;
     }
-    setAction(previewing ? 'suggest' : 'submit');
+    setAction('submit');
     setError(null);
     try {
       const complaint = JSON.stringify({
@@ -377,20 +397,16 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
         occurred_at: date.toISOString(), language: complaintLanguage,
         latitude: latitude === '' ? null : Number(latitude),
         longitude: longitude === '' ? null : Number(longitude),
-        ...(!previewing && validMobile ? {mobile: nationalMobile} : {}),
+        ...(validMobile ? {mobile: nationalMobile} : {}),
       });
-      const withEvidence = !previewing && evidence;
+      const withEvidence = evidence;
       const body = withEvidence ? new FormData() : complaint;
       if (withEvidence) {
         body.append('complaint', complaint);
         body.append('file', evidence);
       }
-      const path = previewing ? '/analyze' : withEvidence ? '/complaints/with-evidence' : '/complaints';
+      const path = withEvidence ? '/complaints/with-evidence' : '/complaints';
       const result = await request(path, {method: 'POST', body});
-      if (previewing) {
-        setSuggestion(result);
-        return;
-      }
       if (!result?.id || !result?.tracking_key) throw new Error('Missing receipt');
       setReceipt({id: result.id, tracking_key: result.tracking_key, analysis: result.analysis, evidence: result.evidence});
       setEvidence(null);
@@ -400,7 +416,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
       if (problem.message === 'A Bangladesh mobile number is required for guest complaints') {
         onExpired();
         setError('mobileError');
-      } else if (!previewing && evidence && (problem.status === 413 ||
+      } else if (evidence && (problem.status === 413 ||
         (problem.status === 422 && /^Upload a valid|^Upload a playable|^Evidence videos/.test(problem.message)))) {
         setError('evidenceError');
       } else setError(problem);
@@ -457,7 +473,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
             aria-describedby="complaint-privacy"/>
           <div className="citizen-description-tools">
             <button className="citizen-ai-chip" type="button" onClick={event => submit(event, true)}
-              disabled={busy || isPreview || checkingSession}>
+              disabled={busy || isPreview}>
               <Bot size={14} aria-hidden="true"/>{action === 'suggest' ? t.checking : report.detailsAnalysis}
             </button>
             <small className="citizen-counter">{number.format(form.text.length)} / {number.format(1000)}</small>
@@ -648,7 +664,11 @@ function CitizenProfile({t, language, session, onSignOut, onExpired}) {
 
   return <>
     <div className="citizen-profile-actions">
-      <dl><dt>{t.auth.email}</dt><dd>{session.email}</dd></dl>
+      <dl className="citizen-profile-contact">
+        {session.name && <div><dt>{t.auth.name}</dt><dd>{session.name}</dd></div>}
+        <div><dt>{t.auth.email}</dt><dd>{session.email}</dd></div>
+        {session.mobile && <div><dt>{t.homeReport.mobile}</dt><dd>{session.mobile}</dd></div>}
+      </dl>
       <div className="citizen-profile-links">
         {session.role === 'admin' && <a className="citizen-text-button" href="#admin">{t.workspace}</a>}
         <button className="citizen-text-button" type="button" onClick={onSignOut}>{t.signOut}</button>
@@ -703,14 +723,14 @@ function AccountDialog({t, language, onClose, onLogin}) {
       <X size={22} aria-hidden="true"/>
     </button>
     <span className="citizen-card-icon"><UserRound size={22} aria-hidden="true"/></span>
-    <AccountForm t={t} onLogin={onLogin}/>
-    <a className="citizen-text-button citizen-admin-link" href="#forgot-password" onClick={() => dialog.current.close()}>
-      {recoveryLabel(language, 'forgot')}
-    </a>
+    <AccountForm t={t} onLogin={onLogin}
+      forgot={<a className="citizen-text-button" href="#forgot-password" onClick={() => dialog.current.close()}>
+        {recoveryLabel(language, 'forgot')}
+      </a>}/>
   </dialog>;
 }
 
-function AccountForm({t, admin = false, onLogin}) {
+function AccountForm({t, admin = false, onLogin, forgot}) {
   const [register, setRegister] = useState(false);
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState(null);
@@ -721,11 +741,16 @@ function AccountForm({t, admin = false, onLogin}) {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
     const credentials = {email: String(fields.get('email')).trim(), password: fields.get('password')};
+    if (register) {
+      credentials.name = String(fields.get('name')).trim();
+      credentials.mobile = String(fields.get('mobile')).trim();
+    }
     setBusy(true);
     setDetail(null);
     setCreated(false);
     try {
-      const account = await request(register ? '/auth/register' : '/auth/login', {
+      const path = admin ? '/auth/admin/login' : register ? '/auth/register' : '/auth/login';
+      const account = await request(path, {
         method: 'POST',
         body: JSON.stringify(credentials),
       });
@@ -745,17 +770,25 @@ function AccountForm({t, admin = false, onLogin}) {
   return <>
     {!admin && <h2 id="citizen-account-heading">{heading}</h2>}
     <form className="citizen-form" onSubmit={submit}>
+      {register && <>
+        <label>{t.auth.name}<input name="name" autoComplete="name" required minLength={2} maxLength={100} disabled={busy}/></label>
+        <label>{t.homeReport.mobile}<input name="mobile" type="tel" inputMode="tel" autoComplete="tel"
+          placeholder="01XXXXXXXXX" required maxLength={32} disabled={busy}/></label>
+      </>}
       <label>{t.auth.email}<input name="email" type="email" autoComplete="email" required maxLength={254} disabled={busy}/></label>
       <label>{t.auth.password}
         <input key={register} name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={10} maxLength={128} required disabled={busy}/>
         {register && <small>{t.auth.passwordHint}</small>}
       </label>
       {created && <p role="status">{t.auth.created}</p>}
-      {detail && <p className="citizen-error" role="alert">{errorCopy(t, detail, 'auth')}</p>}
+      {detail && <p className="citizen-error" role="alert">{register && detail.status === 422 ? t.auth.invalidRegistration : errorCopy(t, detail, 'auth')}</p>}
       <button type="submit" className="citizen-button citizen-submit" disabled={busy}>{busy ? t.auth.wait : heading}<ArrowRight size={18} aria-hidden="true"/></button>
     </form>
-    {!admin && <button type="button" className="citizen-text-button" disabled={busy} onClick={() => {setRegister(!register); setDetail(null); setCreated(false);}}>
-      {register ? t.auth.signIn : t.auth.register}
-    </button>}
+    {!admin && <div className="citizen-account-actions">
+      <button type="button" className="citizen-text-button" disabled={busy} onClick={() => {setRegister(!register); setDetail(null); setCreated(false);}}>
+        {register ? t.auth.signIn : t.auth.register}
+      </button>
+      {!register && forgot}
+    </div>}
   </>;
 }

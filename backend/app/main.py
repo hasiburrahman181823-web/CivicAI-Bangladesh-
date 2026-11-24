@@ -11,15 +11,15 @@ from argon2.exceptions import VerificationError
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from pydantic import ValidationError
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, delete, func, or_, literal, union_all, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import ALLOWED_HOSTS, CORS_ORIGINS, PRODUCTION
 from .db import Base, engine, get_db
-from .models import AdminExportAudit, Audit, Complaint, ComplaintIntake, LoginSession, TicketEvent, TicketMessage, User
-from .schemas import Credentials, ComplaintInput, ComplaintSubmission, ReviewInput, TrackingInput
+from .models import AdminExportAudit, Audit, CitizenContact, Complaint, ComplaintIntake, LoginSession, TicketEvent, TicketMessage, User
+from .schemas import Credentials, Registration, ComplaintSuggestion, ComplaintSubmission, ReviewInput, TrackingInput
 from .services.analysis import analyze, candidate_context, duplicate_candidates
 from .ml.embeddings import load_encoder
 from .ml.predict import ARTIFACTS, benchmark_forecast, load_text
@@ -27,7 +27,7 @@ from .ml.intake import assess, load_intake_model
 from .routers.media import router as media_router
 from .routers.recovery import router as recovery_router
 from .routers.tickets import router as ticket_router
-from .services.intake import masked_contact, seal_intake
+from .services.intake import masked_contact, seal_intake, vault
 from .services.evidence import evidence_json, evidence_record, prepare_evidence
 from .privacy import redact_input, redact_contact
 from .security import COOKIE, RequestProtection, configure_limit_store, get_session, guarded_password_operation, hasher, issue_session, limits, session_digest, throttle
@@ -129,11 +129,15 @@ def closure_benchmark(category: str, occurred_at: datetime):
     return result
 
 @app.post("/api/auth/register")
-def register(data: Credentials, request: Request, db=Depends(get_db)):
+def register(data: Registration, request: Request, db=Depends(get_db)):
     throttle(request, "register", 3)
     password_hash = guarded_password_operation(hasher.hash, data.password)
-    db.add(User(email=data.email, password_hash=password_hash))
+    user = User(email=data.email, password_hash=password_hash)
+    db.add(user)
     try:
+        db.flush()
+        db.add(CitizenContact(user_id=user.id, name=data.name, sealed_mobile=vault.encrypt(data.mobile.encode()),
+                              mobile_last4=data.mobile[-4:]))
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -141,9 +145,18 @@ def register(data: Credentials, request: Request, db=Depends(get_db)):
 
 @app.post("/api/auth/login")
 def login(data: Credentials, request: Request, response: Response, db=Depends(get_db)):
+    return authenticate(data, request, response, db, role="citizen")
+
+
+@app.post("/api/auth/admin/login")
+def admin_login(data: Credentials, request: Request, response: Response, db=Depends(get_db)):
+    return authenticate(data, request, response, db, role="admin")
+
+
+def authenticate(data, request, response, db, *, role):
     throttle(request, "login", 5)
     throttle(request, "login-account", 8, identity=data.email)
-    user = db.scalar(select(User).where(User.email == data.email))
+    user = db.scalar(select(User).where(User.email == data.email, User.role == role))
     verified_hash = user.password_hash if user else dummy_hash
     try:
         guarded_password_operation(hasher.verify, verified_hash, data.password)
@@ -153,16 +166,29 @@ def login(data: Credentials, request: Request, response: Response, db=Depends(ge
         raise HTTPException(401, "Invalid email or password")
     updated_hash = guarded_password_operation(hasher.hash, data.password) if verified_hash.startswith("$argon2") else None
     user = db.get(User, user.id, with_for_update=True, populate_existing=True)
-    if not user or user.password_hash != verified_hash:
+    if not user or user.role != role or user.password_hash != verified_hash:
         raise HTTPException(401, "Invalid email or password")
     if updated_hash:
         user.password_hash = updated_hash
     issue_session(db, user, response, prior_token=request.cookies.get(COOKIE))
-    return {"role":user.role,"email":user.email}
+    return account_summary(user, db)
 
 @app.get("/api/auth/me")
-def me(user=Depends(current_user)):
-    return {"role":user.role,"email":user.email}
+def me(user=Depends(current_user), db=Depends(get_db)):
+    return account_summary(user, db)
+
+
+def account_summary(user, db):
+    result = {"role": user.role, "email": user.email}
+    contact = db.get(CitizenContact, user.id)
+    if contact is not None:
+        result.update(name=contact.name, mobile="•••• " + contact.mobile_last4)
+    return result
+
+
+@app.get("/admin", include_in_schema=False)
+def admin_entry():
+    return RedirectResponse("/#admin", status_code=307)
 
 @app.get("/api/auth/me/complaints")
 def my_complaints(user=Depends(current_user), db=Depends(get_db)):
@@ -214,10 +240,9 @@ def logout(request: Request, response: Response, db=Depends(get_db)):
     return {"message":"Signed out"}
 
 @app.post('/api/analyze')
-def analysis(data: ComplaintInput, request: Request):
+def analysis(data: ComplaintSuggestion, request: Request):
     throttle(request, 'analyze', 10)
-    data = redact_input(data)
-    return analyze(data.text, text_model, data.language, data.occurred_at)
+    return analyze(redact_contact(data.text), text_model, data.language)
 
 @app.post('/api/complaints')
 def create(data: ComplaintSubmission, request: Request, db=Depends(get_db)):

@@ -320,10 +320,13 @@ body { margin: 0; }
 .citizen-receipt dt { font-size: 14px; font-weight: 700; }
 .citizen-receipt dd { margin: 5px 0 0; padding: 8px 10px; background: var(--paper); border-radius: 7px; overflow-wrap: anywhere; font-size: 13px; user-select: all; }
 .citizen-receipt-links { margin-top: 13px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 13px; }
-.citizen-dialog { position: fixed; inset: 0; margin: auto; width: min(440px, calc(100% - 28px)); max-height: calc(100% - 28px); overflow-y: auto; box-shadow: 0 20px 65px #021b1740; }
+.citizen-dialog { position: fixed; inset: 0; margin: auto; width: min(470px, calc(100% - 28px)); max-height: calc(100dvh - 28px); overflow-y: auto; overscroll-behavior: contain; box-shadow: 0 20px 65px #021b1740; }
 .citizen-dialog::backdrop { background: #042b25a0; backdrop-filter: blur(4px); }
 .citizen-dialog h2 { margin-top: 11px; }
 .citizen-dialog .citizen-form { margin: 18px 0 11px; }
+.citizen-account-actions { display: grid; justify-items: start; gap: 10px; padding-top: 10px; margin-top: 12px; border-top: 1px solid var(--border); }
+.citizen-account-actions > :is(a, button) { min-height: 44px; align-items: center; }
+.citizen-profile-contact { display: flex; flex-wrap: wrap; gap: 10px 24px; min-width: 0; }
 .citizen-close { position: absolute; right: 14px; top: 14px; border: 0; border-radius: 8px; width: 40px; height: 40px; background: var(--paper); color: var(--brand); display: grid; place-items: center; }
 .citizen-loading { padding: 24px; }
 

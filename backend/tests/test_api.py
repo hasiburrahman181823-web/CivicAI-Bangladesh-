@@ -14,12 +14,18 @@ os.environ['DATABASE_URL'] = 'sqlite:///' + str(Path(tempfile.mkdtemp()) / 'test
 from fastapi.testclient import TestClient
 from backend.app.main import app, limits, hasher
 from backend.app.db import Base, SessionLocal, get_db
-from backend.app.models import Complaint, ComplaintIntake, TicketEvent, User
+from backend.app.models import CitizenContact, Complaint, ComplaintIntake, EmailResetCode, TicketEvent, User
 from backend.app.routers import recovery, tickets
 from backend.app.security import JWT_SECRET, SESSION_AUDIENCE, SESSION_ISSUER
 
 def payload(**changes):
     return {'title': 'Water supply issue', 'text': 'No water near the school for three days', 'area': 'Mirpur 10', 'language': 'English', 'mobile': '01700001234', 'occurred_at': (datetime.now(timezone.utc)-timedelta(hours=1)).isoformat(), **changes}
+
+
+def register_citizen(client, credentials):
+    return client.post("/api/auth/register", json={
+        "name": "Test Citizen", "mobile": "০১৭০০০০১২৩৪", **credentials,
+    })
 
 
 def test_guest_uploads_are_committed_with_complaints_and_available_to_reviewers():
@@ -53,7 +59,7 @@ def test_guest_uploads_are_committed_with_complaints_and_available_to_reviewers(
         with SessionLocal() as db:
             db.add(User(email=staff["email"], password_hash=hasher.hash(staff["password"]), role="admin"))
             db.commit()
-        assert admin.post("/api/auth/login", json=staff).status_code == 200
+        assert admin.post("/api/auth/admin/login", json=staff).status_code == 200
 
         for name, supplied, original, stored in (
             ("proof.png", "image/png", image.getvalue(), "image/jpeg"),
@@ -96,7 +102,7 @@ def test_guest_mobile_encryption_and_audited_contact_access(monkeypatch):
             db.add(User(email=staff["email"], password_hash=hasher.hash(staff["password"]), role="admin"))
             db.commit()
         assert client.get(path).status_code == 401
-        assert client.post("/api/auth/login", json=staff).status_code == 200
+        assert client.post("/api/auth/admin/login", json=staff).status_code == 200
         assert client.get(path).json()["intake"] == {"mobile": "•••• 1234", "verified": False}
         assert client.get(path).json()["assessment"]["summary"]
         assert client.post(path + "/contact", json={"reason": "Review the contact details"}).status_code == 403
@@ -137,12 +143,12 @@ def test_ticket_ownership_evidence_updates_and_legacy_password():
         assert uploaded.status_code == 201
         evidence_url = path + "/evidence/" + uploaded.json()["id"]
         assert "attachment" in client.get(evidence_url).headers["Content-Disposition"]
-        assert outsider.post("/api/auth/register", json=other).status_code == 200
+        assert register_citizen(outsider, other).status_code == 200
         assert outsider.post("/api/auth/login", json=other).status_code == 200
         assert outsider.get(path).status_code == 404 and outsider.get(evidence_url).status_code == 404
         assert outsider.post(path + "/messages", json={"body": "Unauthorized reply"}).status_code == 404
         assert client.post(path + "/messages", json={"body": "The leak spread. Contact me@example.org."}).status_code == 201
-        assert reviewer.post("/api/auth/login", json=staff).status_code == 200
+        assert reviewer.post("/api/auth/admin/login", json=staff).status_code == 200
         assert reviewer.post(path + "/messages", json={"body": "An inspection is being arranged."}).status_code == 201
         assert reviewer.patch("/api/admin/complaints/" + created.json()["id"], json={
             "status": "In progress", "priority": "High", "note": "Inspection has been arranged.",
@@ -189,14 +195,14 @@ def test_admin_authorization_and_audit():
     limits.clear()
     with TestClient(app) as client:
         assert client.get('/api/admin/complaints').status_code == 401
-        client.post('/api/auth/register', json={'email':'citizen@example.org','password':'test-password-123'})
+        register_citizen(client, {'email':'citizen@example.org','password':'test-password-123'})
         assert client.post('/api/auth/login',json={'email':'citizen@example.org','password':'test-password-123'}).status_code == 200
         assert client.get('/api/admin/complaints').status_code == 403
         assert client.get('/api/admin/audit').status_code == 403
         with SessionLocal() as db:
             db.add(User(email='admin@example.org',password_hash=hasher.hash('test-admin-password'),role='admin'))
             db.commit()
-        assert client.post('/api/auth/login',json={'email':'admin@example.org','password':'test-admin-password'}).status_code == 200
+        assert client.post('/api/auth/admin/login',json={'email':'admin@example.org','password':'test-admin-password'}).status_code == 200
         item=client.post('/api/complaints',json=payload()).json()
         response=client.patch('/api/admin/complaints/'+item['id'],json={'status':'In progress','priority':'High','note':'Verified the incident location with the service team.'})
         assert response.status_code == 200
@@ -251,9 +257,9 @@ def test_profile_lists_only_signed_in_citizens_complaints():
     with TestClient(app) as client:
         assert client.get('/api/auth/me/complaints').status_code == 401
         assert client.post('/api/complaints', json=payload(title='Guest report')).status_code == 200
-        assert client.post('/api/auth/register', json=first).status_code == 200
+        assert register_citizen(client, first).status_code == 200
         assert client.post('/api/auth/login', json=first).status_code == 200
-        assert client.get('/api/auth/me').json() == {'role': 'citizen', 'email': first['email']}
+        assert client.get('/api/auth/me').json()['email'] == first['email']
         assert client.get('/api/auth/me/complaints').json() == []
         response = client.post('/api/complaints', json=payload(title='Owned report'))
         assert response.status_code == 200
@@ -267,7 +273,7 @@ def test_profile_lists_only_signed_in_citizens_complaints():
         }]
         assert client.post('/api/auth/logout').status_code == 200
         assert client.get('/api/auth/me/complaints').status_code == 401
-        assert client.post('/api/auth/register', json=second).status_code == 200
+        assert register_citizen(client, second).status_code == 200
         assert client.post('/api/auth/login', json=second).status_code == 200
         assert client.get('/api/auth/me/complaints').json() == []
         assert client.get('/api/admin/complaints').status_code == 403
@@ -290,7 +296,7 @@ def test_security_boundaries(tmp_path):
         assert client.post('/api/auth/login',json={'email':'incorrect','password':'example-validation-marker'}).status_code==422
         response=client.post('/api/auth/login',json={'email':'bad','password':'example-validation-marker'})
         assert 'example-validation-marker' not in response.text
-        client.post('/api/auth/register',json={'email':'session@example.org','password':'session-pass-123'})
+        register_citizen(client, {'email':'session@example.org','password':'session-pass-123'})
         logged=client.post('/api/auth/login',json={'email':'session@example.org','password':'session-pass-123'})
         assert logged.status_code==200 and 'token' not in logged.json()
         assert 'httponly' in logged.headers['Set-Cookie'].lower() and 'samesite=strict' in logged.headers['Set-Cookie'].lower()
@@ -326,7 +332,7 @@ def test_saved_recovery_code_is_single_use_and_revokes_sessions():
     new_password = 'replacement-password-456'
     with TestClient(app) as client:
         assert client.post('/api/auth/recovery/code', json={'password': account['password']}).status_code == 401
-        assert client.post('/api/auth/register', json=account).status_code == 200
+        assert register_citizen(client, account).status_code == 200
         assert client.post('/api/auth/login', json=account).status_code == 200
         old_session = client.cookies.get('civicai_session')
         assert client.post('/api/auth/recovery/code', json={'password': 'wrong-password-456'}).status_code == 401
@@ -341,30 +347,58 @@ def test_saved_recovery_code_is_single_use_and_revokes_sessions():
 
 
 def test_email_recovery_has_generic_response_and_expires(monkeypatch):
-    from sqlalchemy import select
-    from backend.app.models import PasswordRecoveryGrant
-
     limits.clear()
     delivered = []
-    monkeypatch.setattr(recovery, 'mail_settings', lambda: ('test-key', 'test@example.org', 'https://example.org'))
+    monkeypatch.setattr(recovery, 'mail_settings', lambda: ('test-key', 'test@example.org'))
     monkeypatch.setattr(recovery, 'send_recovery_email', lambda settings, email, code: delivered.append((email, code)))
     account = {'email': 'mail-recovery@example.org', 'password': 'mail-password-123'}
     with TestClient(app) as client:
-        assert client.post('/api/auth/register', json=account).status_code == 200
+        assert register_citizen(client, account).status_code == 200
         result = client.post('/api/auth/recovery/email', json={'email': account['email']})
         other = client.post('/api/auth/recovery/email', json={'email': 'unknown-email@example.org'})
         assert result.status_code == other.status_code == 202 and result.json() == other.json()
         assert len(delivered) == 1 and delivered[0][0] == account['email']
         code = delivered[0][1]
+        assert len(code) == 6 and code.isdigit() and code not in result.text
         with SessionLocal() as db:
-            grant = db.scalar(select(PasswordRecoveryGrant).where(PasswordRecoveryGrant.digest == recovery.digest(code)))
-            assert grant.digest != code and grant.method == 'email'
+            user = db.scalar(select(User).where(User.email == account['email']))
+            grant = db.get(EmailResetCode, user.id)
+            assert grant.digest == recovery.email_code_digest(user.id, code) and grant.digest != code
             grant.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            grant.issued_at = datetime.now(timezone.utc) - timedelta(minutes=11)
             db.commit()
-        assert client.post('/api/auth/recovery/reset', json={'code': code, 'password': 'changed-password-456'}).status_code == 400
+        confirm = '/api/auth/recovery/email/confirm'
+        data = {'email': account['email'], 'code': code, 'password': 'changed-password-456'}
+        assert client.post(confirm, json=data).status_code == 400
         assert client.post('/api/auth/recovery/email', json={'email': account['email']}).status_code == 202
         assert len(delivered) == 2
-        assert client.post('/api/auth/recovery/reset', json={'code': delivered[1][1], 'password': 'changed-password-456'}).status_code == 200
+        data['code'] = delivered[1][1]
+        assert client.post(confirm, json={**data, 'email': 'unknown-email@example.org'}).status_code == 400
+        invalid_code = '000000' if data['code'] != '000000' else '999999'
+        assert client.post(confirm, json={**data, 'code': invalid_code}).status_code == 400
+        assert client.post(confirm, json=data).status_code == 200
+        assert client.post(confirm, json=data).status_code == 400
+        assert client.post('/api/auth/login', json={'email': data['email'], 'password': data['password']}).status_code == 200
+
+
+def test_registration_stores_contact_and_suggestions_need_only_description():
+    limits.clear()
+    account = {'email': 'registered-details@example.org', 'password': 'valid-test-password'}
+    with TestClient(app) as client:
+        assert client.post('/api/auth/register', json=account).status_code == 422
+        assert register_citizen(client, {**account, 'mobile': 'not-a-number'}).status_code == 422
+        assert register_citizen(client, account).status_code == 200
+        assert client.post('/api/auth/admin/login', json=account).status_code == 401
+        assert client.post('/api/auth/login', json=account).status_code == 200
+        assert client.get('/api/auth/me').json() == {
+            'name': 'Test Citizen', 'mobile': '•••• 1234', 'email': account['email'], 'role': 'citizen',
+        }
+        with SessionLocal() as db:
+            user_id = db.scalar(select(User.id).where(User.email == account['email']))
+            contact = db.get(CitizenContact, user_id)
+            assert b'+8801700001234' not in contact.sealed_mobile
+        result = client.post('/api/analyze', json={'text': 'pani nai', 'language': 'Banglish'})
+        assert result.status_code == 200 and result.json()['category'] == 'Water'
 
 
 def test_first_admin_setup_requires_operator_code_and_allows_password_sign_in(monkeypatch, tmp_path):
@@ -397,8 +431,9 @@ def test_first_admin_setup_requires_operator_code_and_allows_password_sign_in(mo
             assert client.post('/api/auth/admin-setup/challenge', json={'code': setup_code}).status_code == 409
             assert client.post('/api/auth/admin-setup/complete', json=credentials).status_code == 409
             account = {'email': owner, 'password': credentials['password']}
-            assert client.post('/api/auth/login', json={**account, 'password': 'wrong-admin-password'}).status_code == 401
-            login = client.post('/api/auth/login', json=account)
+            assert client.post('/api/auth/admin/login', json={**account, 'password': 'wrong-admin-password'}).status_code == 401
+            assert client.post('/api/auth/login', json=account).status_code == 401
+            login = client.post('/api/auth/admin/login', json=account)
             assert login.status_code == 200 and login.json()['role'] == 'admin'
             assert 'Max-Age=900' in login.headers['set-cookie']
             assert client.get('/api/admin/complaints').status_code == 200
@@ -417,7 +452,7 @@ def test_previously_enrolled_admin_can_sign_in_with_existing_password():
             db.add(AdminMFA(user_id=user.id,secret_encrypted='legacy enrollment record'))
             db.commit()
         args={'email':'mfa@example.org','password':'mfa-admin-pass'}
-        assert client.post('/api/auth/login',json=args).status_code==200
+        assert client.post('/api/auth/admin/login',json=args).status_code==200
         assert client.get('/api/admin/complaints').status_code == 200
         assert client.post('/api/auth/logout').status_code==200
         assert client.get('/api/admin/complaints').status_code == 401

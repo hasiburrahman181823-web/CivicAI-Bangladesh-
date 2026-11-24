@@ -13,6 +13,23 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(String(16), default='citizen')
 
+class CitizenContact(Base):
+    __tablename__ = "citizen_contacts"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    sealed_mobile: Mapped[bytes] = mapped_column(LargeBinary)
+    mobile_last4: Mapped[str] = mapped_column(String(4))
+
+
+class EmailResetCode(Base):
+    __tablename__ = "email_reset_codes"
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    digest: Mapped[str] = mapped_column(String(64))
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(default=0)
+
+
 class Complaint(Base):
     __tablename__ = 'complaints'
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

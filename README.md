@@ -86,7 +86,9 @@ The citizen dashboard at `/#dashboard` links to public submissions, private trac
 
 Citizens can generate one single-use recovery code from their profile after confirming their current password. The **Forgot password?** page accepts that code. Resetting the password revokes all previous sessions and recovery grants for that account.
 
-For optional email recovery, configure a verified Resend sender, a sending-only `RESEND_API_KEY`, and `RECOVERY_FROM_EMAIL` on Render. Keep email click tracking off for password reset links. CivicAI uses the Render service's HTTPS URL by default. Set `RECOVERY_ORIGIN` when using a separate HTTPS public origin. If email delivery is not configured, the recovery page offers saved codes.
+For email recovery, configure a verified Resend sender, a sending-only `RESEND_API_KEY`, and `RECOVERY_FROM_EMAIL` on Render. The recovery page sends a six-digit code to the citizen's account email. The code expires after ten minutes and allows up to five attempts. Saved recovery codes are also supported.
+
+Administrators sign in through `/admin`. Citizen registration asks for a name, Bangladesh mobile number, email and password. Registered mobile numbers are encrypted using `INTAKE_ENCRYPTION_KEY`.
 
 The first administrator can activate the configured `CIVICAI_ADMIN_EMAIL` at `/#admin-setup` using the short-lived `CIVICAI_ADMIN_SETUP_CODE` held in the Render service's private environment. Set its absolute UTC deadline via `CIVICAI_ADMIN_SETUP_EXPIRES`. The operator sets a unique password of at least 15 characters. The page disables first-time enrollment once an administrator exists. The local `backend.scripts.create_admin` command remains available to authorized operators.
 

@@ -18,6 +18,31 @@ class AccountEmail(BaseModel):
 class Credentials(AccountEmail):
     password: str = Field(min_length=10, max_length=128)
 
+
+def normalize_mobile(value):
+    mobile = re.sub(r"[\s()-]", "", value.translate(DIGITS))
+    if not re.fullmatch(r"(?:\+?88)?01[3-9][0-9]{8}", mobile):
+        raise ValueError("Enter a valid Bangladesh mobile number")
+    return "+88" + mobile[-11:]
+
+
+class Registration(Credentials):
+    name: str = Field(min_length=2, max_length=100)
+    mobile: str = Field(max_length=32)
+
+    @field_validator("name")
+    @classmethod
+    def clean_name(cls, value):
+        value = " ".join(value.split())
+        if len(value) < 2 or any(unicodedata.category(char) in {"Cc", "Cs"} for char in value):
+            raise ValueError("Enter a valid name")
+        return value
+
+    @field_validator("mobile")
+    @classmethod
+    def clean_mobile(cls, value):
+        return normalize_mobile(value)
+
 ADMIN_PASSWORD_MINIMUM = 15
 
 class RecoveryCodeRequest(BaseModel):
@@ -25,6 +50,11 @@ class RecoveryCodeRequest(BaseModel):
 
 class PasswordReset(BaseModel):
     code: str = Field(pattern=r"^[A-Za-z0-9_-]{43}$")
+    password: str = Field(min_length=10, max_length=128)
+
+
+class EmailCodePasswordReset(AccountEmail):
+    code: str = Field(pattern=r"^[0-9]{6}$")
     password: str = Field(min_length=10, max_length=128)
 
 class AdminSetupProof(BaseModel):
@@ -73,18 +103,26 @@ class ReviewInput(BaseModel):
     duplicate_of: str | None = None
 
 
+class ComplaintSuggestion(BaseModel):
+    text: str = Field(min_length=5, max_length=1000)
+    language: Literal['Bangla', 'English', 'Banglish'] = 'English'
+
+    @field_validator("text")
+    @classmethod
+    def clean(cls, value):
+        value = ComplaintInput.clean(value)
+        if len(value) < 5:
+            raise ValueError("Enter at least five characters")
+        return value
+
+
 class ComplaintSubmission(ComplaintInput):
     mobile: str | None = Field(default=None, max_length=32)
 
     @field_validator("mobile")
     @classmethod
     def normalize_mobile(cls, value):
-        if value is None:
-            return None
-        mobile = re.sub(r"[\s()-]", "", value.translate(DIGITS))
-        if not re.fullmatch(r"(?:\+?88)?01[3-9][0-9]{8}", mobile):
-            raise ValueError("Enter a valid Bangladesh mobile number")
-        return "+88" + mobile[-11:]
+        return normalize_mobile(value) if value is not None else None
 
 
 class FollowupInput(BaseModel):

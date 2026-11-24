@@ -5,9 +5,10 @@ import {request} from '../api/client';
 const codePattern = '(?:[A-Za-z0-9_]|-){43}';
 const wording = {
   bn: {
-    forgot: 'পাসওয়ার্ড ভুলে গেছেন?', emailIntro: 'অ্যাকাউন্টের ইমেইল ঠিকানায় পাসওয়ার্ড রিসেট লিংক নিন।',
-    emailButton: 'রিসেট লিংক পাঠান', emailOff: 'ইমেইলে রিসেট লিংক পাঠানোর ব্যবস্থা এখনো চালু হয়নি।',
-    emailSent: 'এই ঠিকানায় পুনরুদ্ধারযোগ্য অ্যাকাউন্ট থাকলে রিসেট লিংক পাঠানো হবে। লিংকটি ২০ মিনিট কার্যকর।',
+    forgot: 'পাসওয়ার্ড ভুলে গেছেন?', emailIntro: 'অ্যাকাউন্টের ইমেইল ঠিকানায় পাসওয়ার্ড বদলানোর কোড নিন।',
+    emailButton: 'ইমেইলে কোড পাঠান', emailOff: 'ইমেইলে কোড পাঠানো এখন অনুপলব্ধ।',
+    emailSent: 'এই ঠিকানায় অ্যাকাউন্ট থাকলে ৬ সংখ্যার কোড আসবে। কোডটি ১০ মিনিট কার্যকর।',
+    emailCode: 'ইমেইলে পাওয়া ৬ সংখ্যার কোড', changeEmail: 'অন্য ইমেইল দিন', resend: 'আবার কোড পাঠান',
     backup: 'রিকভারি কোড', useBackup: 'সংরক্ষিত রিকভারি কোড ব্যবহার করুন',
     backupIntro: 'পাসওয়ার্ড ভুলে গেলে এই একবার ব্যবহারযোগ্য কোড দিয়ে ফিরে আসতে পারবেন। নতুন কোড বানালে আগেরটি বাতিল হবে।',
     generate: 'রিকভারি কোড তৈরি করুন', save: 'কোডটি এখনই পাসওয়ার্ড ম্যানেজারে রাখুন। এটি আবার দেখানো হবে না।',
@@ -25,9 +26,10 @@ const wording = {
     adminPasswordHint: 'অন্তত ১৫ অক্ষরের একটি নতুন, আলাদা পাসওয়ার্ড দিন।',
   },
   en: {
-    forgot: 'Forgot password?', emailIntro: 'Request a reset link at the email address for your account.',
-    emailButton: 'Send reset link', emailOff: 'Email recovery is currently unavailable.',
-    emailSent: 'If this address has an eligible account, a reset link will arrive by email. The link lasts 20 minutes.',
+    forgot: 'Forgot password?', emailIntro: 'Request a password reset code at the email address for your account.',
+    emailButton: 'Email me a code', emailOff: 'Email recovery is currently unavailable.',
+    emailSent: 'If this address has an eligible account, a six-digit code will arrive by email. It expires in 10 minutes.',
+    emailCode: 'Six-digit email code', changeEmail: 'Use another email', resend: 'Send a new code',
     backup: 'Recovery code', useBackup: 'Use a saved recovery code',
     backupIntro: 'Save a single-use code for when you forget your password. Generating a new code revokes the previous one.',
     generate: 'Generate recovery code', save: 'Save this code in your password manager now. It is shown only once.',
@@ -85,19 +87,48 @@ function RecoveryHeading({title, intro, admin = false}) {
 export function PasswordRecovery({t, language, route, emailAvailable, onReset, onSignIn}) {
   const labels = wording[language];
   const [linkCode] = useState(() => route.split('/')[1] || '');
-  const reset = route.startsWith('#reset-password');
+  const legacyReset = route.startsWith('#reset-password');
+  const [email, setEmail] = useState('');
+  const [emailPending, setEmailPending] = useState(false);
+  const [resendAt, setResendAt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState('');
   const [done, setDone] = useState(false);
+  const reset = legacyReset || emailPending;
   useEffect(() => {
     if (linkCode && window.location.hash === route) {
       history.replaceState(null, '', '#reset-password');
     }
   }, [linkCode, route]);
 
+  useEffect(() => {
+    if (!resendAt) return;
+    const timer = window.setTimeout(() => setResendAt(0), Math.max(0, resendAt - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [resendAt]);
+
+  async function requestCode(address) {
+    setBusy(true);
+    setFailure('');
+    try {
+      await submit('recovery/email', {email: address});
+      setEmail(address);
+      setEmailPending(true);
+      setResendAt(Date.now() + 60000);
+    } catch (problem) {
+      setFailure(problem);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     const fields = new FormData(event.currentTarget);
+    if (!reset) {
+      await requestCode(String(fields.get('email')).trim());
+      return;
+    }
     const password = fields.get('password');
     if (reset && password !== fields.get('confirmation')) {
       setFailure('mismatch');
@@ -106,11 +137,14 @@ export function PasswordRecovery({t, language, route, emailAvailable, onReset, o
     setBusy(true);
     setFailure('');
     try {
-      await (reset
-        ? submit('recovery/reset', {code: linkCode || fields.get('code').trim(), password})
-        : submit('recovery/email', {email: fields.get('email').trim()}));
+      const code = linkCode || String(fields.get('code')).trim();
+      if (emailPending) {
+        await submit('recovery/email/confirm', {
+          email, password, code: code.replace(/[০-৯]/g, digit => String(digit.charCodeAt(0) - 2534)),
+        });
+      } else await submit('recovery/reset', {code, password});
       setDone(true);
-      if (reset) onReset();
+      onReset();
     } catch (problem) {
       setFailure(problem);
     } finally {
@@ -120,26 +154,35 @@ export function PasswordRecovery({t, language, route, emailAvailable, onReset, o
 
   return <>
     <RecoveryHeading title={reset ? labels.reset : labels.forgot}
-      intro={reset ? labels.resetIntro : emailAvailable ? labels.emailIntro : labels.emailOff}/>
+      intro={emailPending ? labels.emailSent : legacyReset ? labels.resetIntro
+        : emailAvailable === false ? labels.emailOff : labels.emailIntro}/>
     {done ? <div className="citizen-form">
-      <p role="status">{reset ? labels.resetDone : labels.emailSent}</p>
-      {reset && <button type="button" className="citizen-button citizen-submit" onClick={onSignIn}>{t.signIn}</button>}
-    </div> : (reset || emailAvailable) && <form className="citizen-form" onSubmit={handleSubmit}>
+      <p role="status">{labels.resetDone}</p>
+      <button type="button" className="citizen-button citizen-submit" onClick={onSignIn}>{t.signIn}</button>
+    </div> : <form key={reset ? 'reset' : 'email'} className="citizen-form" onSubmit={handleSubmit}>
       {reset ? <>
-        {!linkCode && <label>{labels.backup}
+        {emailPending ? <label>{labels.emailCode}
+          <input name="code" pattern="[0-9০-৯]{6}" inputMode="numeric" autoComplete="one-time-code" required disabled={busy} maxLength={6}/>
+        </label> : !linkCode && <label>{labels.backup}
           <input name="code" pattern={codePattern} autoComplete="off" spellCheck={false} required disabled={busy} maxLength={43}/>
         </label>}
         <NewPasswordFields t={t} labels={labels} busy={busy}/>
       </> : <label>{t.auth.email}
-        <input name="email" type="email" autoComplete="email" required maxLength={254} disabled={busy}/>
+        <input name="email" type="email" autoComplete="email" defaultValue={email} required maxLength={254} disabled={busy}/>
       </label>}
       {failure && <p className="citizen-error" role="alert">{failure === 'mismatch' ? labels.mismatch : message(t, labels, failure, 'invalid')}</p>}
-      <button type="submit" className="citizen-button citizen-submit" disabled={busy}>
+      <button type="submit" className="citizen-button citizen-submit" disabled={busy || (!reset && emailAvailable !== true)}>
         {busy ? t.auth.wait : reset ? labels.reset : labels.emailButton}
       </button>
     </form>}
     {!reset && <a className="citizen-text-button citizen-admin-link" href="#reset-password">{labels.useBackup}</a>}
-    {reset && !done && <a className="citizen-text-button citizen-admin-link" href="#forgot-password">{labels.forgot}</a>}
+    {legacyReset && !done && <a className="citizen-text-button citizen-admin-link" href="#forgot-password">{labels.forgot}</a>}
+    {emailPending && !done && <div className="citizen-account-actions">
+      <button type="button" className="citizen-text-button" disabled={busy || !!resendAt}
+        onClick={() => requestCode(email)}>{labels.resend}</button>
+      <button type="button" className="citizen-text-button" disabled={busy}
+        onClick={() => {setEmailPending(false); setFailure('');}}>{labels.changeEmail}</button>
+    </div>}
   </>;
 }
 
