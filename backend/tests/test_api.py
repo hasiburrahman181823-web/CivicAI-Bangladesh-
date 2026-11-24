@@ -3,8 +3,10 @@ import json
 import os
 import tempfile
 import uuid
+import httpx
 import jwt
 import av
+import pytest
 from argon2 import PasswordHasher
 from PIL import Image
 from sqlalchemy import select
@@ -346,12 +348,32 @@ def test_saved_recovery_code_is_single_use_and_revokes_sessions():
         assert client.post('/api/auth/login', json={**account, 'password': new_password}).status_code == 200
 
 
-def test_email_recovery_has_generic_response_and_expires(monkeypatch):
+@pytest.mark.parametrize('provider', ['resend', 'brevo'])
+def test_email_recovery_has_generic_response_and_expires(monkeypatch, provider):
     limits.clear()
     delivered = []
-    monkeypatch.setattr(recovery, 'mail_settings', lambda: ('test-key', 'test@example.org'))
-    monkeypatch.setattr(recovery, 'send_recovery_email', lambda settings, email, code: delivered.append((email, code)))
-    account = {'email': 'mail-recovery@example.org', 'password': 'mail-password-123'}
+    monkeypatch.setenv('RECOVERY_EMAIL_PROVIDER', provider)
+    monkeypatch.setenv(f'{provider.upper()}_API_KEY', 'test-key')
+    monkeypatch.setenv('RECOVERY_FROM_EMAIL', 'CivicAI Bangladesh <test@example.org>')
+
+    def accept_email(url, *, headers, json, timeout):
+        if provider == 'brevo':
+            assert url == 'https://api.brevo.com/v3/smtp/email'
+            assert headers == {'api-key': 'test-key'}
+            assert json['sender'] == {'name': 'CivicAI Bangladesh', 'email': 'test@example.org'}
+            recipient, text = json['to'][0]['email'], json['textContent']
+        else:
+            assert url == 'https://api.resend.com/emails'
+            assert headers == {'Authorization': 'Bearer test-key'}
+            assert json['from'] == 'CivicAI Bangladesh <test@example.org>'
+            recipient, text = json['to'][0], json['text']
+        code = text.splitlines()[0].rsplit(' ', 1)[-1]
+        assert f'password reset code is {code}.' in text
+        delivered.append((recipient, code))
+        return httpx.Response(201, request=httpx.Request('POST', url))
+
+    monkeypatch.setattr(recovery.httpx, 'post', accept_email)
+    account = {'email': f'{provider}-recovery@example.org', 'password': 'mail-password-123'}
     with TestClient(app) as client:
         assert register_citizen(client, account).status_code == 200
         result = client.post('/api/auth/recovery/email', json={'email': account['email']})

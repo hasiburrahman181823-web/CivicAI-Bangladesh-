@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
+from email.utils import parseaddr
 
 import httpx
 from argon2.exceptions import VerificationError
@@ -36,9 +37,13 @@ def utc(value):
 
 
 def mail_settings():
-    key = os.getenv("RESEND_API_KEY", "").strip()
+    provider = os.getenv("RECOVERY_EMAIL_PROVIDER", "resend").strip().lower()
+    key_var = {"resend": "RESEND_API_KEY", "brevo": "BREVO_API_KEY"}.get(provider)
+    if key_var is None:
+        return None
+    key = os.getenv(key_var, "").strip()
     sender = os.getenv("RECOVERY_FROM_EMAIL", "").strip()
-    return (key, sender) if key and sender else None
+    return (provider, key, sender) if key and sender else None
 
 
 def admin_setup_settings():
@@ -71,21 +76,30 @@ def replace_grant(db, user_id, method, code_hash, expires_at=None):
 
 
 def send_recovery_email(settings, email, code):
-    key, sender = settings
-    response = httpx.post(
-        "https://api.resend.com/emails",
-        headers={"Authorization": f"Bearer {key}"},
-        json={
-            "from": sender, "to": [email], "subject": "CivicAI Bangladesh password reset",
-            "text": (
-                f"CivicAI Bangladesh-এর পাসওয়ার্ড বদলানোর কোড: {code}\n"
-                "কোডটি ১০ মিনিট কার্যকর। এটি কারও সঙ্গে শেয়ার করবেন না।\n\n"
-                f"Your CivicAI Bangladesh password reset code is {code}. It expires in 10 minutes. "
-                "If you did not request a reset, ignore this email.\n"
-            ),
-        },
-        timeout=8.0,
+    provider, key, sender = settings
+    subject = "CivicAI Bangladesh password reset"
+    text = (
+        f"CivicAI Bangladesh-এর পাসওয়ার্ড বদলানোর কোড: {code}\n"
+        "কোডটি ১০ মিনিট কার্যকর। এটি কারও সঙ্গে শেয়ার করবেন না।\n\n"
+        f"Your CivicAI Bangladesh password reset code is {code}. It expires in 10 minutes. "
+        "If you did not request a reset, ignore this email.\n"
     )
+    if provider == "brevo":
+        name, address = parseaddr(sender)
+        response = httpx.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={"api-key": key},
+            json={"sender": {"name": name or "CivicAI Bangladesh", "email": address},
+                  "to": [{"email": email}], "subject": subject, "textContent": text},
+            timeout=8.0,
+        )
+    else:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {key}"},
+            json={"from": sender, "to": [email], "subject": subject, "text": text},
+            timeout=8.0,
+        )
     response.raise_for_status()
 
 

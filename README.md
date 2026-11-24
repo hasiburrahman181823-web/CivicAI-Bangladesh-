@@ -86,7 +86,7 @@ The citizen dashboard at `/#dashboard` links to public submissions, private trac
 
 Citizens can generate one single-use recovery code from their profile after confirming their current password. The **Forgot password?** page accepts that code. Resetting the password revokes all previous sessions and recovery grants for that account.
 
-For email recovery, configure a verified Resend sender, a sending-only `RESEND_API_KEY`, and `RECOVERY_FROM_EMAIL` on Render. The recovery page sends a six-digit code to the citizen's account email. The code expires after ten minutes and allows up to five attempts. Saved recovery codes are also supported.
+Configure `RECOVERY_FROM_EMAIL` with a sender verified by your email provider. The default provider is Resend and uses a sending-only `RESEND_API_KEY`. To use Brevo, set `RECOVERY_EMAIL_PROVIDER=brevo` and `BREVO_API_KEY`. Store API keys in Render's environment settings. The recovery page sends a six-digit code to the citizen's account email. The code expires after ten minutes and allows up to five attempts. Saved recovery codes are also supported.
 
 Administrators sign in through `/admin`. Citizen registration asks for a name, Bangladesh mobile number, email and password. Registered mobile numbers are encrypted using `INTAKE_ENCRYPTION_KEY`.
 
