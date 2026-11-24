@@ -1,7 +1,7 @@
 import React, {lazy, Suspense, useEffect, useRef, useState} from 'react';
 import {
   ArrowLeft, ArrowRight, Bot, CheckCircle2, ClipboardList, Construction,
-  Download, Droplets, FileText, Info, LockKeyhole, MapPin, Moon, Paperclip, Search, ShieldCheck,
+  Download, Droplets, FileText, Info, MapPin, Moon, Paperclip, Search, ShieldCheck,
   Sparkles, Sun, Trash2, UserRound, X, Zap,
 } from 'lucide-react';
 import {request} from '../api/client';
@@ -65,12 +65,17 @@ function HeroOverview({t, language, headingRef, show}) {
     <div className="citizen-service"><span aria-hidden="true"/><span>{t.service}</span><i aria-hidden="true"/><span>{labels.serviceDetail}</span></div>
     <h1 tabIndex={-1} ref={headingRef}>{t.heading[0]} <em>{t.heading[1]}</em></h1>
     <p>{t.intro}</p>
-    <a className="citizen-hero-banner" href="#track">
-      <img src="/civicai-progress-banner.jpg" width={325} height={63} alt=""/>
-      <span className="citizen-hero-banner-action">
-        <strong>{t.trackLink}</strong><ArrowRight size={18} aria-hidden="true"/>
-      </span>
-    </a>
+    <div className="citizen-hero-links">
+      <div className="citizen-hero-banner">
+        <div className="citizen-hero-banner-copy">
+          <strong>{labels.bannerTitle}</strong>
+          <span>{labels.bannerSubtitle}</span>
+        </div>
+      </div>
+      <a className="citizen-button citizen-hero-track" href="#track">
+        {t.trackLink}<ArrowRight size={18} aria-hidden="true"/>
+      </a>
+    </div>
     {summary && <dl className="citizen-hero-numbers">
       {[[labels.totals, summary.total], [labels.resolved, summary.resolved], [labels.active, summary.in_progress]].map(([label, value]) => (
         <div key={label}><dt>{label}</dt><dd>{number.format(value)}</dd></div>
@@ -487,7 +492,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
           <textarea id="complaint-description" name="text" value={form.text} onChange={change}
             placeholder={t.detailsPlaceholder} minLength={10} maxLength={1000} rows={2} required disabled={busy}
             aria-invalid={suggestionError === 'suggestionText' || undefined}
-            aria-describedby={suggestionError === 'suggestionText' ? 'complaint-privacy complaint-suggestion' : 'complaint-privacy'}/>
+            aria-describedby={suggestionError === 'suggestionText' ? 'complaint-suggestion' : undefined}/>
           <div className="citizen-description-tools">
             <button className="citizen-ai-chip" type="button" onClick={getSuggestion}
               disabled={busy || isPreview} aria-controls="complaint-suggestion">
@@ -567,7 +572,6 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
         setSuggestionError(null);
       }}
     />}
-    <p id="complaint-privacy" className="citizen-form-privacy"><LockKeyhole size={15} aria-hidden="true"/>{t.privacyText}</p>
   </>;
 }
 
