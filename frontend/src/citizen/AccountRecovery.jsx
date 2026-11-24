@@ -9,7 +9,7 @@ const wording = {
     emailButton: 'ইমেইলে কোড পাঠান', emailOff: 'ইমেইলে কোড পাঠানো এখন অনুপলব্ধ।',
     emailSent: 'এই ঠিকানায় অ্যাকাউন্ট থাকলে ৬ সংখ্যার কোড আসবে। কোডটি ১০ মিনিট কার্যকর।',
     emailCode: 'ইমেইলে পাওয়া ৬ সংখ্যার কোড', changeEmail: 'অন্য ইমেইল দিন', resend: 'আবার কোড পাঠান',
-    backup: 'রিকভারি কোড', useBackup: 'সংরক্ষিত রিকভারি কোড ব্যবহার করুন',
+    backup: 'রিকভারি কোড',
     backupIntro: 'পাসওয়ার্ড ভুলে গেলে এই একবার ব্যবহারযোগ্য কোড দিয়ে ফিরে আসতে পারবেন। নতুন কোড বানালে আগেরটি বাতিল হবে।',
     generate: 'রিকভারি কোড তৈরি করুন', save: 'কোডটি এখনই পাসওয়ার্ড ম্যানেজারে রাখুন। এটি আবার দেখানো হবে না।',
     backupCreated: 'রিকভারি কোড তৈরি হয়েছে।',
@@ -30,7 +30,7 @@ const wording = {
     emailButton: 'Email me a code', emailOff: 'Email recovery is currently unavailable.',
     emailSent: 'If this address has an eligible account, a six-digit code will arrive by email. It expires in 10 minutes.',
     emailCode: 'Six-digit email code', changeEmail: 'Use another email', resend: 'Send a new code',
-    backup: 'Recovery code', useBackup: 'Use a saved recovery code',
+    backup: 'Recovery code',
     backupIntro: 'Save a single-use code for when you forget your password. Generating a new code revokes the previous one.',
     generate: 'Generate recovery code', save: 'Save this code in your password manager now. It is shown only once.',
     backupCreated: 'Recovery code generated.',
@@ -175,7 +175,6 @@ export function PasswordRecovery({t, language, route, emailAvailable, onReset, o
         {busy ? t.auth.wait : reset ? labels.reset : labels.emailButton}
       </button>
     </form>}
-    {!reset && <a className="citizen-text-button citizen-admin-link" href="#reset-password">{labels.useBackup}</a>}
     {legacyReset && !done && <a className="citizen-text-button citizen-admin-link" href="#forgot-password">{labels.forgot}</a>}
     {emailPending && !done && <div className="citizen-account-actions">
       <button type="button" className="citizen-text-button" disabled={busy || !!resendAt}
