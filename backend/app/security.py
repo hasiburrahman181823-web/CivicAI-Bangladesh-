@@ -19,6 +19,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import delete
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.responses import JSONResponse
+from .services.evidence import MAX_VIDEO_SIZE
 
 from .config import CORS_ORIGINS, JWT_SECRET, PRODUCTION, REDIS_URL, TRUSTED_PROXY_NETWORKS
 from .models import LoginSession, User
@@ -225,9 +226,10 @@ class RequestProtection:
                     return await reject(403, "Origin is not allowed")
             if headers.get("sec-fetch-site") == "cross-site":
                 return await reject(403, "Cross-site writes are blocked")
-            ticket_upload = path.startswith("/api/tickets/") and path.endswith("/evidence")
+            ticket_upload = (path == "/api/complaints/with-evidence"
+                             or path.startswith("/api/tickets/") and path.endswith("/evidence"))
             media = path.startswith("/api/media/") or ticket_upload
-            cap = (2*1024*1024 + 16*1024) if ticket_upload else (9*1024*1024 if media else 24*1024)
+            cap = MAX_VIDEO_SIZE + 32*1024 if ticket_upload else (9*1024*1024 if media else 24*1024)
             declared = headers.getlist("content-length")
             if declared and (len(declared) != 1 or not declared[0].isascii() or not declared[0].isdigit()
                              or len(declared[0]) > 9 or int(declared[0]) > cap):
@@ -245,7 +247,7 @@ class RequestProtection:
             try:
                 body = bytearray()
                 try:
-                    with anyio.fail_after(15):
+                    with anyio.fail_after(45 if ticket_upload else 15):
                         while True:
                             message = await receive()
                             if message["type"] == "http.disconnect":

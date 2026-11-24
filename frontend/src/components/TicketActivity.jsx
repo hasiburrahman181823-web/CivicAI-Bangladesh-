@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Bell, Clock3, Download, FilePlus2, MessageCircle, ShieldCheck} from 'lucide-react';
 import {API, request} from '../api/client';
+import {evidenceAccept, validEvidence} from '../api/evidence';
 import './ticket.css';
 
 const en = {
@@ -9,12 +10,13 @@ const en = {
   hours: 'Typical time from submission', samples: 'Past reports used', passed: 'The estimated time has passed.',
   history: 'Status history', discussion: 'Ticket messages', none: 'No messages yet.',
   staff: 'Review team', citizen: 'Citizen', write: 'Write an update', send: 'Send message',
-  evidence: 'Evidence photos', pick: 'Choose a photo', upload: 'Upload evidence',
-  photoHint: 'JPEG, PNG or WebP. Up to 2 MB per photo and five photos per ticket.',
-  noFiles: 'No photos attached.', download: 'Download photo', update: 'New ticket activity',
+  evidence: 'Photos and videos', pick: 'Choose a photo or video', upload: 'Upload evidence',
+  mediaHint: 'Photos up to 2 MB. MP4, MOV or WebM videos up to 12 MB and 30 seconds. Up to five files per ticket.',
+  noFiles: 'No files attached.', downloadPhoto: 'Download photo', downloadVideo: 'Download video', update: 'New ticket activity',
   guest: 'This guest report has no account for replies.', problem: 'The request could not be completed. Check the information and try again.',
-  tooLarge: 'Choose a photo no larger than 2 MB.', format: 'The photo must be a valid JPEG, PNG or WebP.',
-  limit: 'This ticket has reached the photo limit.', rate: 'Too many requests. Please wait a minute.',
+  tooLarge: 'Photos must be 2 MB or smaller and videos 12 MB or smaller.',
+  format: 'Choose a JPEG, PNG or WebP photo, or a playable MP4, MOV or WebM video of 30 seconds or less.',
+  limit: 'This ticket already has five files.', rate: 'Too many requests. Please wait a minute.',
   expired: 'Your session has expired. Sign in again to see this ticket.',
   assessment: 'AI assessment', suggested: 'Suggested first step', summary: 'Summary',
   sentiment: 'Sentiment', flags: 'Review signals', noFlags: 'No flags',
@@ -35,13 +37,14 @@ const bn = {
   hours: 'জমা দেওয়ার পর সাধারণত যত সময় লাগে', samples: 'বিশ্লেষণে ব্যবহৃত আগের অভিযোগ', passed: 'আনুমানিক সময় পার হয়েছে।',
   history: 'অবস্থার ইতিহাস', discussion: 'টিকিটের বার্তা', none: 'এখনও কোনো বার্তা নেই।',
   staff: 'পর্যালোচনা দল', citizen: 'নাগরিক', write: 'হালনাগাদ লিখুন', send: 'বার্তা পাঠান',
-  evidence: 'প্রমাণের ছবি', pick: 'ছবি বাছাই করুন', upload: 'প্রমাণ আপলোড করুন',
-  photoHint: 'JPEG, PNG বা WebP। প্রতি ছবি সর্বোচ্চ ২ এমবি, প্রতি টিকিটে সর্বোচ্চ ৫টি ছবি।',
-  noFiles: 'কোনো ছবি সংযুক্ত নেই।', download: 'ছবি ডাউনলোড করুন', update: 'টিকিটে নতুন আপডেট এসেছে',
+  evidence: 'প্রমাণের ছবি ও ভিডিও', pick: 'ছবি বা ভিডিও বাছাই করুন', upload: 'প্রমাণ আপলোড করুন',
+  mediaHint: 'ছবি ২ MB পর্যন্ত। MP4, MOV বা WebM ভিডিও ১২ MB ও ৩০ সেকেন্ড পর্যন্ত। প্রতি টিকিটে সর্বোচ্চ ৫টি ফাইল।',
+  noFiles: 'কোনো ফাইল সংযুক্ত নেই।', downloadPhoto: 'ছবি ডাউনলোড করুন', downloadVideo: 'ভিডিও ডাউনলোড করুন', update: 'টিকিটে নতুন আপডেট এসেছে',
   guest: 'অতিথির এই অভিযোগে উত্তর পাঠানোর জন্য কোনো অ্যাকাউন্ট নেই।',
   problem: 'কাজটি সম্পন্ন হয়নি। তথ্য যাচাই করে আবার চেষ্টা করুন।',
-  tooLarge: '২ এমবি বা তার কম আকারের ছবি বাছাই করুন।', format: 'সঠিক JPEG, PNG বা WebP ছবি দিন।',
-  limit: 'এই টিকিটে সর্বোচ্চ সংখ্যক ছবি সংযুক্ত হয়েছে।', rate: 'অনেকবার চেষ্টা করা হয়েছে। এক মিনিট অপেক্ষা করুন।',
+  tooLarge: 'ছবি ২ MB ও ভিডিও ১২ MB-এর মধ্যে রাখুন।',
+  format: 'JPEG, PNG বা WebP ছবি অথবা ৩০ সেকেন্ডের মধ্যে চালানো যায় এমন MP4, MOV বা WebM ভিডিও দিন।',
+  limit: 'এই টিকিটে ইতিমধ্যে ৫টি ফাইল আছে।', rate: 'অনেকবার চেষ্টা করা হয়েছে। এক মিনিট অপেক্ষা করুন।',
   expired: 'সেশনের মেয়াদ শেষ হয়েছে। টিকিট দেখতে আবার সাইন ইন করুন।',
   assessment: 'এআই বিশ্লেষণ', suggested: 'প্রস্তাবিত প্রথম পদক্ষেপ', summary: 'সারসংক্ষেপ',
   sentiment: 'ভাষার আবেগ', flags: 'যাচাইয়ের সংকেত', noFlags: 'কোনো সংকেত নেই',
@@ -163,8 +166,8 @@ export function TicketActivity({id, language, admin = false}) {
     event.preventDefault();
     setProblem(null);
     if (evidence && !file) return;
-    if (evidence && file.size > 2 * 1024 * 1024) {
-      setProblem('tooLarge');
+    if (evidence && !validEvidence(file)) {
+      setProblem('format');
       return;
     }
     setBusy(true);
@@ -230,11 +233,13 @@ export function TicketActivity({id, language, admin = false}) {
     <section className="ticket-section">
       <h3><FilePlus2 size={18}/>{t.evidence}</h3>
       {item.evidence.length ? <ul className="ticket-files">{item.evidence.map((entry, index) => <li key={entry.id}>
-        <a href={API + '/api' + path + '/evidence/' + entry.id}><Download size={15}/>{t.download} {new Intl.NumberFormat(locale).format(index + 1)}</a>
+        <a href={API + '/api' + path + '/evidence/' + entry.id}><Download size={15}/>
+          {entry.content_type?.startsWith('video/') ? t.downloadVideo : t.downloadPhoto} {new Intl.NumberFormat(locale).format(index + 1)}
+        </a>
       </li>)}</ul> : <p>{t.noFiles}</p>}
       {!admin && item.evidence.length < 5 && <form className="ticket-form" onSubmit={event => update(event, true)}>
-        <label>{t.pick}<input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" required onChange={event => setFile(event.target.files[0])}/></label>
-        <small>{t.photoHint}</small>
+        <label>{t.pick}<input ref={fileInput} type="file" accept={evidenceAccept} required onChange={event => setFile(event.target.files[0])}/></label>
+        <small>{t.mediaHint}</small>
         <button className="ticket-button" type="submit" disabled={busy || !file}>{t.upload}</button>
       </form>}
     </section>

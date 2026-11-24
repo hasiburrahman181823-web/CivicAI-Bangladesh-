@@ -5,6 +5,7 @@ import {
   Sparkles, Sun, Trash2, UserRound, X, Zap,
 } from 'lucide-react';
 import {request} from '../api/client';
+import {evidenceAccept, validEvidence} from '../api/evidence';
 import {MediaTools} from '../components/ModelTools';
 import {TicketActivity} from '../components/TicketActivity';
 import {FirstAdminSetup, PasswordRecovery, RecoveryCode, recoveryLabel} from './AccountRecovery';
@@ -19,7 +20,6 @@ const issueIcons = [Construction, Droplets, Trash2, Zap];
 const languages = ['Bangla', 'English', 'Banglish'];
 const emptyForm = {title: '', area: '', text: '', time: '', language: '', latitude: '', longitude: '', mobile: ''};
 const isPreview = import.meta.env.VITE_UI_PREVIEW === '1';
-const evidenceTypes = ['image/jpeg', 'image/png', 'image/webp'];
 const mobileFormat = /^(?:\+?88)?01[3-9][0-9]{8}$/;
 
 function errorCopy(t, problem, context) {
@@ -319,6 +319,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
   const [suggestion, setSuggestion] = useState(null);
   const [evidence, setEvidence] = useState(null);
   const receiptHeading = useRef(null);
+  const fileInput = useRef(null);
   const busy = action !== null;
   const number = new Intl.NumberFormat(language === 'bn' ? 'bn-BD' : 'en-GB');
   const report = t.homeReport;
@@ -353,45 +354,38 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
       setError('coordinatePair');
       return;
     }
-    if (!previewing && !session && !validMobile) {
+    if (!previewing && (!session || form.mobile.trim()) && !validMobile) {
       setError('mobileError');
       return;
     }
-    if (!previewing && session?.role === 'citizen' && evidence &&
-      (!evidenceTypes.includes(evidence.type) || evidence.size > 2 * 1024 * 1024)) {
+    if (!previewing && evidence && !validEvidence(evidence)) {
       setError('evidenceError');
       return;
     }
     setAction(previewing ? 'suggest' : 'submit');
     setError(null);
     try {
-      const result = await request(previewing ? '/analyze' : '/complaints', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: title.trim(), area: area.trim(), text: text.trim(),
-          occurred_at: date.toISOString(), language: complaintLanguage,
-          latitude: latitude === '' ? null : Number(latitude),
-          longitude: longitude === '' ? null : Number(longitude),
-          ...(!previewing && !session ? {mobile: nationalMobile} : {}),
-        }),
+      const complaint = JSON.stringify({
+        title: title.trim(), area: area.trim(), text: text.trim(),
+        occurred_at: date.toISOString(), language: complaintLanguage,
+        latitude: latitude === '' ? null : Number(latitude),
+        longitude: longitude === '' ? null : Number(longitude),
+        ...(!previewing && validMobile ? {mobile: nationalMobile} : {}),
       });
+      const withEvidence = !previewing && evidence;
+      const body = withEvidence ? new FormData() : complaint;
+      if (withEvidence) {
+        body.append('complaint', complaint);
+        body.append('file', evidence);
+      }
+      const path = previewing ? '/analyze' : withEvidence ? '/complaints/with-evidence' : '/complaints';
+      const result = await request(path, {method: 'POST', body});
       if (previewing) {
         setSuggestion(result);
         return;
       }
       if (!result?.id || !result?.tracking_key) throw new Error('Missing receipt');
-      let attachment;
-      if (evidence && session?.role === 'citizen') {
-        const body = new FormData();
-        body.append('file', evidence);
-        try {
-          await request('/tickets/' + result.id + '/evidence', {method: 'POST', body});
-          attachment = 'evidenceAdded';
-        } catch {
-          attachment = 'evidenceRetry';
-        }
-      }
-      setReceipt({id: result.id, tracking_key: result.tracking_key, analysis: result.analysis, attachment});
+      setReceipt({id: result.id, tracking_key: result.tracking_key, analysis: result.analysis, evidence: result.evidence});
       setEvidence(null);
       setForm(emptyForm);
       setSuggestion(null);
@@ -399,6 +393,9 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
       if (problem.message === 'A Bangladesh mobile number is required for guest complaints') {
         onExpired();
         setError('mobileError');
+      } else if (!previewing && evidence && (problem.status === 413 ||
+        (problem.status === 422 && /^Upload a valid|^Upload a playable|^Evidence videos/.test(problem.message)))) {
+        setError('evidenceError');
       } else setError(problem);
     } finally {
       setAction(null);
@@ -407,7 +404,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
 
   if (receipt) return <div className="citizen-receipt">
     <CardHeader Icon={CheckCircle2} title={t.success} intro={t.savePrompt} headingRef={receiptHeading}/>
-    {receipt.attachment && <p className="citizen-receipt-attachment" role="status">{report[receipt.attachment]}</p>}
+    {receipt.evidence && <p className="citizen-receipt-attachment" role="status">{report.evidenceAdded}</p>}
     <dl>
       <div><dt>{t.reportId}</dt><dd><code>{receipt.id}</code></dd></div>
       <div><dt>{t.trackingKey}</dt><dd><code>{receipt.tracking_key}</code></dd></div>
@@ -461,24 +458,32 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
         </div>
       </div>
       {suggestion && <TriageSuggestion result={suggestion} t={t} language={language} number={number}/>}
-      {!session && !checkingSession && <label className="citizen-mobile-field">{report.mobile} <span className="citizen-field-qualifier">({report.required})</span>
+      {!checkingSession && <label className="citizen-mobile-field">{report.mobile} <span className="citizen-field-qualifier">({session ? t.optional : report.required})</span>
         <span className="citizen-phone-control">
           <span className="citizen-phone-prefix" aria-hidden="true"><span className="citizen-flag"/> +880</span>
           <input name="mobile" type="tel" inputMode="tel" autoComplete="tel-national" value={form.mobile}
-            onChange={change} placeholder="01XXXXXXXXX" maxLength={32} required disabled={busy}
+            onChange={change} placeholder="01XXXXXXXXX" maxLength={32} required={!session} disabled={busy}
             aria-invalid={error === 'mobileError' || undefined} aria-describedby="guest-mobile-note"/>
           {validMobile && <span className="citizen-ai-chip"><CheckCircle2 size={14} aria-hidden="true"/>{report.mobileFormat}</span>}
         </span>
         <small id="guest-mobile-note">{report.mobilePrivacy}</small>
       </label>}
-      {session?.role === 'citizen' && <label className="citizen-evidence-control">
-        <Paperclip size={17} aria-hidden="true"/><span>{evidence?.name || report.evidence} {!evidence && <span className="citizen-field-qualifier">({t.optional})</span>}</span>
-        <input type="file" accept={evidenceTypes.join(',')} disabled={busy}
-          aria-label={report.evidence} onChange={event => { setEvidence(event.target.files[0] || null); setError(null); }}/>
-      </label>}
-      {!session && !checkingSession && <button className="citizen-evidence-control" type="button" onClick={onSignIn} disabled={isPreview}>
-        <Paperclip size={17} aria-hidden="true"/><span>{report.signInEvidence} <span className="citizen-field-qualifier">({t.optional})</span></span>
-      </button>}
+      <div className="citizen-evidence-field">
+        <label className="citizen-evidence-control">
+          <Paperclip size={17} aria-hidden="true"/><span>{evidence?.name || report.evidence} {!evidence && <span className="citizen-field-qualifier">({t.optional})</span>}</span>
+          <input ref={fileInput} type="file" accept={evidenceAccept} disabled={busy || isPreview}
+            aria-label={report.evidence} aria-describedby="evidence-help" onChange={event => {
+              const file = event.target.files[0];
+              setEvidence(file || null);
+              setError(file && !validEvidence(file) ? 'evidenceError' : null);
+            }}/>
+        </label>
+        {evidence && <button type="button" className="citizen-remove-evidence" aria-label={report.removeEvidence}
+          disabled={busy} onClick={() => { fileInput.current.value = ''; setEvidence(null); setError(null); }}>
+          <X size={17} aria-hidden="true"/>
+        </button>}
+        <small id="evidence-help">{report.evidenceHelp}</small>
+      </div>
       <details className="citizen-optional">
         <summary>{t.extra}<span>{t.optional}</span></summary>
         <div className="citizen-form-row">
@@ -500,7 +505,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
       </details>
       {error && <p className="citizen-error" role="alert">{typeof error === 'string' ? report[error] || t[error] : errorCopy(t, error, 'report')}</p>}
       <button className="citizen-button citizen-submit" type="submit" value="submit" disabled={busy || isPreview || checkingSession}>
-        <Sparkles size={18} aria-hidden="true"/><span>{action === 'submit' ? t.sending : report.submit}</span>
+        <Sparkles size={18} aria-hidden="true"/><span>{action === 'submit' ? (evidence ? report.uploading : t.sending) : report.submit}</span>
       </button>
     </form>
     {!session && !checkingSession && <button className="citizen-report-account" type="button" onClick={onSignIn} disabled={isPreview}>

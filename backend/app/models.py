@@ -71,6 +71,16 @@ class TicketEvidence(Base):
     size: Mapped[int]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
+
+class TicketVideoEvidence(Base):
+    __tablename__ = "ticket_video_evidence"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    complaint_id: Mapped[str] = mapped_column(ForeignKey("complaints.id", ondelete="CASCADE"), index=True)
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    content_type: Mapped[str] = mapped_column(String(24))
+    size: Mapped[int]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+
 class Audit(Base):
     __tablename__ = 'audits'
     id: Mapped[int] = mapped_column(primary_key=True)

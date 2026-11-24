@@ -87,19 +87,19 @@ body { margin: 0; }
   position: absolute;
   z-index: -1;
   inset: 0 auto auto 0;
-  width: min(55.8vw, 950px);
-  aspect-ratio: 670 / 146;
+  width: min(51.34vw, 930px);
+  aspect-ratio: 690 / 355;
   overflow: hidden;
-  mask-image: linear-gradient(#000 80%, transparent), linear-gradient(90deg, #000 84%, transparent);
-  mask-composite: intersect;
+  mask-image: linear-gradient(#000 34%, transparent 42%),
+    radial-gradient(ellipse 19% 81% at 97% 31%, #000 37%, transparent 86%);
   pointer-events: none;
 }
 
 .citizen-hero-photo img {
-  width: 200.6%;
+  width: 194.7826%;
   height: auto;
   max-width: none;
-  margin-block-start: -10.3%;
+  margin-block-start: -10%;
   display: block;
 }
 
@@ -215,6 +215,9 @@ body { margin: 0; }
 .citizen-shell .citizen-evidence-control:hover, .citizen-shell .citizen-evidence-control:focus-within { border-color: var(--brand); }
 .citizen-evidence-control svg { flex: none; color: var(--brand); }
 .citizen-report .citizen-form .citizen-evidence-control input { position: absolute; inset: 0; margin: 0; height: 100%; opacity: 0; cursor: pointer; }
+.citizen-evidence-field { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 6px; }
+.citizen-evidence-field small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; margin-top: 3px; }
+.citizen-remove-evidence { display: grid; place-items: center; width: 36px; border: 1px solid var(--report-edge); border-radius: 8px; color: var(--brand); background: var(--report-control); }
 .citizen-shell .citizen-report .citizen-submit { justify-content: center; min-height: 43px; padding-block: 8px; text-align: center; background: #086247; }
 .citizen-shell .citizen-report .citizen-submit:hover { background: #074c39; }
 [data-theme="dark"] .citizen-shell .citizen-report .citizen-submit { background: #a1e7c9; }

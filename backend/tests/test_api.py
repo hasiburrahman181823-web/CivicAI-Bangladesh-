@@ -1,8 +1,10 @@
 import io
+import json
 import os
 import tempfile
 import uuid
 import jwt
+import av
 from argon2 import PasswordHasher
 from PIL import Image
 from sqlalchemy import select
@@ -18,6 +20,63 @@ from backend.app.security import JWT_SECRET, SESSION_AUDIENCE, SESSION_ISSUER
 
 def payload(**changes):
     return {'title': 'Water supply issue', 'text': 'No water near the school for three days', 'area': 'Mirpur 10', 'language': 'English', 'mobile': '01700001234', 'occurred_at': (datetime.now(timezone.utc)-timedelta(hours=1)).isoformat(), **changes}
+
+
+def test_guest_uploads_are_committed_with_complaints_and_available_to_reviewers():
+    limits.clear()
+    staff = {"email": "evidence-review@example.org", "password": "test-evidence-review-password"}
+    image = io.BytesIO()
+    Image.new("RGB", (16, 16), "green").save(image, "PNG")
+    clip = io.BytesIO()
+    with av.open(clip, "w", format="mp4") as video:
+        stream = video.add_stream("libx264", rate=12)
+        stream.width = 48
+        stream.height = 32
+        stream.pix_fmt = "yuv420p"
+        video.metadata["comment"] = "private fixture metadata"
+        for _ in range(3):
+            for packet in stream.encode(av.VideoFrame.from_image(Image.new("RGB", (48, 32), "green"))):
+                video.mux(packet)
+        for packet in stream.encode():
+            video.mux(packet)
+
+    endpoint = "/api/complaints/with-evidence"
+    with TestClient(app) as guest, TestClient(app) as admin:
+        before = guest.get("/api/public/summary").json()["total"]
+        missing_phone = guest.post(endpoint, data={"complaint": json.dumps(payload(mobile=None))},
+                                   files={"file": ("proof.png", image.getvalue(), "image/png")})
+        assert missing_phone.status_code == 422
+        invalid = guest.post(endpoint, data={"complaint": json.dumps(payload())},
+                             files={"file": ("proof.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")})
+        assert invalid.status_code == 422
+        assert guest.get("/api/public/summary").json()["total"] == before
+        with SessionLocal() as db:
+            db.add(User(email=staff["email"], password_hash=hasher.hash(staff["password"]), role="admin"))
+            db.commit()
+        assert admin.post("/api/auth/login", json=staff).status_code == 200
+
+        for name, supplied, original, stored in (
+            ("proof.png", "image/png", image.getvalue(), "image/jpeg"),
+            ("proof.mp4", "video/mp4", clip.getvalue(), "video/mp4"),
+        ):
+            response = guest.post(endpoint, data={"complaint": json.dumps(payload())},
+                                  files={"file": (name, original, supplied)})
+            assert response.status_code == 200, response.text
+            saved = response.json()
+            path = "/api/tickets/" + saved["id"]
+            proof = saved["evidence"]
+            assert proof["content_type"] == stored
+            assert guest.get(path + "/evidence/" + proof["id"]).status_code == 401
+            tracked = guest.post("/api/track/" + saved["id"], json={"tracking_key": saved["tracking_key"]})
+            assert tracked.json()["status"] == "Submitted"
+            assert admin.get(path).json()["evidence"][0]["id"] == proof["id"]
+            downloaded = admin.get(path + "/evidence/" + proof["id"])
+            assert downloaded.headers["content-type"] == stored
+            assert downloaded.headers["content-disposition"].startswith("attachment;")
+            assert downloaded.headers["cache-control"] == "no-store"
+            assert len(downloaded.content) == proof["size"]
+            assert b"private fixture metadata" not in downloaded.content
+        assert guest.get("/api/public/summary").json()["total"] == before + 2
 
 
 def test_guest_mobile_encryption_and_audited_contact_access(monkeypatch):

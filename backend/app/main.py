@@ -8,7 +8,8 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from argon2.exceptions import VerificationError
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
+from pydantic import ValidationError
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +28,7 @@ from .routers.media import router as media_router
 from .routers.recovery import router as recovery_router
 from .routers.tickets import router as ticket_router
 from .services.intake import masked_contact, seal_intake
+from .services.evidence import evidence_json, evidence_record, prepare_evidence
 from .privacy import redact_input, redact_contact
 from .security import COOKIE, RequestProtection, configure_limit_store, get_session, guarded_password_operation, hasher, issue_session, limits, session_digest, throttle
 from .ml.integrity import verify_artifacts
@@ -219,12 +221,27 @@ def analysis(data: ComplaintInput, request: Request):
 
 @app.post('/api/complaints')
 def create(data: ComplaintSubmission, request: Request, db=Depends(get_db)):
+    return save_complaint(data, request, db)
+
+
+@app.post('/api/complaints/with-evidence')
+def create_with_evidence(request: Request, complaint: str = Form(max_length=12000),
+                         file: UploadFile = File(), db=Depends(get_db)):
+    try:
+        data = ComplaintSubmission.model_validate_json(complaint)
+    except ValidationError as error:
+        raise HTTPException(422, "Check the submitted fields") from error
+    return save_complaint(data, request, db, file)
+
+
+def save_complaint(data: ComplaintSubmission, request: Request, db, file: UploadFile | None = None):
     throttle(request, 'submit', 5)
     user, _ = get_session(request, db, required=False)
     if not user and not data.mobile:
         raise HTTPException(422, "A Bangladesh mobile number is required for guest complaints")
     if not user:
         throttle(request, "submit-guest-mobile", 3, identity=data.mobile)
+    media = prepare_evidence(file) if file is not None else None
     data = redact_input(data)
     tracking_key = secrets.token_urlsafe(24)
     result = analyze(data.text, text_model, data.language, data.occurred_at)
@@ -236,9 +253,14 @@ def create(data: ComplaintSubmission, request: Request, db=Depends(get_db)):
     db.flush()
     db.add(seal_intake(item, data.mobile, request))
     db.add(TicketEvent(complaint_id=item.id, status=item.status, created_at=item.created_at))
+    evidence = evidence_record(item.id, *media) if media else None
+    if evidence is not None:
+        db.add(evidence)
     db.commit()
     response = serialize(item)
     response["analysis"] = {key: value for key, value in result.items() if key != "assessment"}
+    if evidence is not None:
+        response["evidence"] = evidence_json(evidence)
     return {**response, "tracking_key": tracking_key}
 
 @app.post('/api/track/{complaint_id}')

@@ -1,4 +1,3 @@
-import io
 import json
 import math
 import uuid
@@ -6,20 +5,19 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import Response
-from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func, select
 
 from ..db import get_db
-from ..models import Audit, Complaint, ComplaintIntake, TicketEvent, TicketEvidence, TicketMessage
+from ..models import Audit, Complaint, ComplaintIntake, TicketEvent, TicketEvidence, TicketMessage, TicketVideoEvidence
 from ..privacy import redact_contact
 from ..schemas import ContactAccessInput, FollowupInput
 from ..security import get_session, throttle
+from ..services.evidence import MEDIA_EXTENSIONS, MAX_EVIDENCE, evidence_json, evidence_record, prepare_evidence
 from ..services.intake import contact_reviewers, masked_contact, open_intake
 
 
 router = APIRouter(prefix="/api/tickets")
-MAX_IMAGE_SIZE = 2 * 1024 * 1024
-MAX_IMAGES = 5
+EVIDENCE_MODELS = (TicketEvidence, TicketVideoEvidence)
 
 
 def ticket_access(complaint_id, request, db, *, lock=False):
@@ -77,9 +75,14 @@ def ticket(complaint_id: uuid.UUID, request: Request, db=Depends(get_db)):
                           .order_by(TicketMessage.id.desc()).limit(100)).all()
     events = db.scalars(select(TicketEvent).where(TicketEvent.complaint_id == item.id)
                         .order_by(TicketEvent.id.desc()).limit(100)).all()
-    evidence = db.execute(select(TicketEvidence.id, TicketEvidence.size, TicketEvidence.created_at)
-                          .where(TicketEvidence.complaint_id == item.id)
-                          .order_by(TicketEvidence.created_at)).all()
+    evidence = []
+    for model in EVIDENCE_MODELS:
+        fields = [model.id, model.size, model.created_at]
+        if model is TicketVideoEvidence:
+            fields.append(model.content_type)
+        for entry in db.execute(select(*fields).where(model.complaint_id == item.id)):
+            evidence.append({"id": entry.id, "size": entry.size, "created_at": utc(entry.created_at),
+                             "content_type": getattr(entry, "content_type", "image/jpeg")})
     result = {
         "id": item.id, "title": item.title, "text": item.text, "area": item.area,
         "category": item.category, "priority": item.priority, "status": item.status,
@@ -87,7 +90,7 @@ def ticket(complaint_id: uuid.UUID, request: Request, db=Depends(get_db)):
         "messages": [message_json(message) for message in reversed(messages)],
         "history": [{"id": event.id, "status": event.status, "created_at": utc(event.created_at)}
                     for event in reversed(events)],
-        "evidence": [{"id": id, "size": size, "created_at": utc(at)} for id, size, at in evidence],
+        "evidence": sorted(evidence, key=lambda entry: entry["created_at"]),
     }
     if not events or events[-1].created_at > item.created_at:
         result["history"].insert(0, {"id": 0, "status": "Submitted", "created_at": utc(item.created_at)})
@@ -116,42 +119,20 @@ def send_message(complaint_id: uuid.UUID, payload: FollowupInput, request: Reque
     return message_json(message)
 
 
-def sanitize_image(blob):
-    try:
-        with Image.open(io.BytesIO(blob), formats=("JPEG", "PNG", "WEBP")) as original:
-            if original.width * original.height > 12_000_000 or getattr(original, "n_frames", 1) != 1:
-                raise ValueError("Unsupported image")
-            original.thumbnail((1600, 1600))
-            image = ImageOps.exif_transpose(original).convert("RGB")
-            output = io.BytesIO()
-            clean = Image.new("RGB", image.size)
-            clean.paste(image)
-            clean.save(output, format="JPEG", quality=85)
-    except (OSError, ValueError, UnidentifiedImageError, Image.DecompressionBombError) as error:
-        raise HTTPException(422, "Upload a valid JPEG, PNG or WebP image under 12 megapixels") from error
-    return output.getvalue()
-
-
 @router.post("/{complaint_id}/evidence", status_code=201)
 def upload_evidence(complaint_id: uuid.UUID, request: Request, file: UploadFile = File(), db=Depends(get_db)):
     item, user = ticket_access(complaint_id, request, db, lock=True)
     if item.owner_id != user.id or user.role == "admin":
         raise HTTPException(403, "Only the ticket owner can submit evidence")
     throttle(request, "ticket-upload", 5, identity=str(user.id))
-    count = db.scalar(select(func.count()).select_from(TicketEvidence)
-                      .where(TicketEvidence.complaint_id == item.id))
-    if count >= MAX_IMAGES:
-        raise HTTPException(409, "This ticket already has five evidence images")
-    blob = file.file.read(MAX_IMAGE_SIZE + 1)
-    if len(blob) > MAX_IMAGE_SIZE:
-        raise HTTPException(413, "Evidence images must be at most 2 MB")
-    image = sanitize_image(blob)
-    if len(image) > MAX_IMAGE_SIZE:
-        raise HTTPException(413, "Evidence image exceeds the storage limit")
-    proof = TicketEvidence(id=str(uuid.uuid4()), complaint_id=item.id, image=image, size=len(image))
+    count = sum(db.scalar(select(func.count()).select_from(model).where(model.complaint_id == item.id))
+                for model in EVIDENCE_MODELS)
+    if count >= MAX_EVIDENCE:
+        raise HTTPException(409, "This ticket already has five evidence files")
+    proof = evidence_record(item.id, *prepare_evidence(file))
     db.add(proof)
     db.commit()
-    return {"id": proof.id, "size": proof.size, "created_at": utc(proof.created_at)}
+    return evidence_json(proof)
 
 
 @router.get("/{complaint_id}/evidence/{evidence_id}")
@@ -161,12 +142,17 @@ def download_evidence(complaint_id: uuid.UUID, evidence_id: uuid.UUID, request: 
     proof = db.scalar(select(TicketEvidence).where(TicketEvidence.id == str(evidence_id),
                                                    TicketEvidence.complaint_id == item.id))
     if proof is None:
-        raise HTTPException(404, "Evidence not found")
+        proof = db.scalar(select(TicketVideoEvidence).where(TicketVideoEvidence.id == str(evidence_id),
+                                                            TicketVideoEvidence.complaint_id == item.id))
+        if proof is None:
+            raise HTTPException(404, "Evidence not found")
     if user.role == "admin":
         db.add(Audit(actor_id=user.id, complaint_id=item.id, action='{"event":"evidence_download"}'))
         db.commit()
-    return Response(proof.image, media_type="image/jpeg", headers={
-        "Content-Disposition": f'attachment; filename="evidence-{proof.id}.jpg"',
+    content_type = getattr(proof, "content_type", "image/jpeg")
+    content = proof.image if isinstance(proof, TicketEvidence) else proof.data
+    return Response(content, media_type=content_type, headers={
+        "Content-Disposition": f'attachment; filename="evidence-{proof.id}.{MEDIA_EXTENSIONS[content_type]}"',
     })
 
 
