@@ -152,6 +152,7 @@ const bn = {
   'CATEGORY': 'বিভাগ',
   'LOCATION': 'অবস্থান',
   'PRIORITY': 'অগ্রাধিকার',
+  'Priority': 'অগ্রাধিকার',
   'STATUS': 'অবস্থা',
   'View details': 'বিস্তারিত দেখুন',
   ' · Demo': ' · নমুনা',

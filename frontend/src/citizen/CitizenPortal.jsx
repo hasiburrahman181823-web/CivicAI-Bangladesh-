@@ -66,9 +66,10 @@ function HeroOverview({t, language, headingRef, show}) {
     <h1 tabIndex={-1} ref={headingRef}>{t.heading[0]} <em>{t.heading[1]}</em></h1>
     <p>{t.intro}</p>
     <a className="citizen-hero-banner" href="#track">
-      <span className="citizen-assurance-icon"><Search size={21} aria-hidden="true"/></span>
-      <span><strong>{t.trackLink}</strong><small>{t.dashboard.trackHelp}</small></span>
-      <ArrowRight size={18} aria-hidden="true"/>
+      <img src="/civicai-progress-banner.jpg" width={325} height={63} alt=""/>
+      <span className="citizen-hero-banner-action">
+        <strong>{t.trackLink}</strong><ArrowRight size={18} aria-hidden="true"/>
+      </span>
     </a>
     {summary && <dl className="citizen-hero-numbers">
       {[[labels.totals, summary.total], [labels.resolved, summary.resolved], [labels.active, summary.in_progress]].map(([label, value]) => (
@@ -324,8 +325,10 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
   const [action, setAction] = useState(null);
   const [error, setError] = useState(null);
   const [suggestion, setSuggestion] = useState(null);
+  const [suggestionError, setSuggestionError] = useState(null);
   const [evidence, setEvidence] = useState(null);
   const receiptHeading = useRef(null);
+  const suggestionFeedback = useRef(null);
   const fileInput = useRef(null);
   const busy = action !== null;
   const number = new Intl.NumberFormat(language === 'bn' ? 'bn-BD' : 'en-GB');
@@ -336,38 +339,50 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
   const validMobile = mobileFormat.test(nationalMobile);
 
   useEffect(() => { if (receipt) receiptHeading.current?.focus(); }, [receipt]);
+  useEffect(() => {
+    if (suggestion || suggestionError) suggestionFeedback.current?.scrollIntoView({block: 'nearest'});
+  }, [suggestion, suggestionError]);
 
   function change(event) {
     const {name, value} = event.target;
     setForm(current => ({...current, [name]: value}));
     setError(null);
-    if (name !== 'mobile') setSuggestion(null);
+    if (name === 'text' || name === 'language') {
+      setSuggestion(null);
+      setSuggestionError(null);
+    }
   }
 
-  async function submit(event, previewing = false) {
-    event.preventDefault();
-    if (isPreview || busy || (!previewing && checkingSession)) return;
-    const {title, area, text, latitude, longitude} = form;
-    if (previewing) {
-      if (text.trim().length < 5) {
-        setError('suggestionText');
-        return;
-      }
-      setAction('suggest');
-      setError(null);
-      setSuggestion(null);
-      try {
-        setSuggestion(await request('/analyze', {
-          method: 'POST',
-          body: JSON.stringify({text: text.trim(), language: complaintLanguage}),
-        }));
-      } catch (problem) {
-        setError(problem);
-      } finally {
-        setAction(null);
-      }
+  async function getSuggestion() {
+    if (isPreview || busy) return;
+    const text = form.text.trim();
+    if (text.length < 5) {
+      setSuggestionError('suggestionText');
       return;
     }
+    setAction('suggest');
+    setSuggestionError(null);
+    setSuggestion(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    try {
+      setSuggestion(await request('/analyze', {
+        method: 'POST',
+        body: JSON.stringify({text, language: complaintLanguage}),
+        signal: controller.signal,
+      }));
+    } catch (problem) {
+      setSuggestionError(problem.status === 429 ? 'rateLimited' : 'suggestionUnavailable');
+    } finally {
+      clearTimeout(timeout);
+      setAction(null);
+    }
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (isPreview || busy || checkingSession) return;
+    const {title, area, text, latitude, longitude} = form;
     if (title.trim().length < 5 || area.trim().length < 2 || text.trim().length < 10) {
       setError('shortReport');
       return;
@@ -412,6 +427,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
       setEvidence(null);
       setForm(emptyForm);
       setSuggestion(null);
+      setSuggestionError(null);
     } catch (problem) {
       if (problem.message === 'A Bangladesh mobile number is required for guest complaints') {
         onExpired();
@@ -470,17 +486,22 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
         <div className="citizen-description-box">
           <textarea id="complaint-description" name="text" value={form.text} onChange={change}
             placeholder={t.detailsPlaceholder} minLength={10} maxLength={1000} rows={2} required disabled={busy}
-            aria-describedby="complaint-privacy"/>
+            aria-invalid={suggestionError === 'suggestionText' || undefined}
+            aria-describedby={suggestionError === 'suggestionText' ? 'complaint-privacy complaint-suggestion' : 'complaint-privacy'}/>
           <div className="citizen-description-tools">
-            <button className="citizen-ai-chip" type="button" onClick={event => submit(event, true)}
-              disabled={busy || isPreview}>
-              <Bot size={14} aria-hidden="true"/>{action === 'suggest' ? t.checking : report.detailsAnalysis}
+            <button className="citizen-ai-chip" type="button" onClick={getSuggestion}
+              disabled={busy || isPreview} aria-controls="complaint-suggestion">
+              <Bot size={14} aria-hidden="true"/>{action === 'suggest' ? report.suggestionPending : report.detailsAnalysis}
             </button>
             <small className="citizen-counter">{number.format(form.text.length)} / {number.format(1000)}</small>
           </div>
         </div>
+        <div className="citizen-suggestion-feedback" id="complaint-suggestion" ref={suggestionFeedback}
+          aria-live="polite" aria-busy={action === 'suggest'}>
+          {suggestionError && <p className="citizen-error">{report[suggestionError] || t[suggestionError]}</p>}
+          {suggestion && <TriageSuggestion result={suggestion} t={t} language={language} number={number}/>}
+        </div>
       </div>
-      {suggestion && <TriageSuggestion result={suggestion} t={t} language={language} number={number}/>}
       {!checkingSession && <label className="citizen-mobile-field">{report.mobile} <span className="citizen-field-qualifier">({session ? t.optional : report.required})</span>
         <span className="citizen-phone-control">
           <span className="citizen-phone-prefix" aria-hidden="true"><span className="citizen-flag"/> +880</span>
@@ -543,6 +564,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
         setForm(previous => ({...previous, text: text.slice(0, 1000)}));
         setError(null);
         setSuggestion(null);
+        setSuggestionError(null);
       }}
     />}
     <p id="complaint-privacy" className="citizen-form-privacy"><LockKeyhole size={15} aria-hidden="true"/>{t.privacyText}</p>
@@ -551,7 +573,7 @@ function ComplaintForm({t, language, onTrack, models, session, checkingSession, 
 
 function TriageSuggestion({result, t, language, number}) {
   const translate = message => translateWorkspace(language, message);
-  return <section className="citizen-triage" aria-live="polite">
+  return <section className="citizen-triage">
     <h3>{t.suggestion}</h3>
     <dl>
       <div><dt>{translate('Category')}</dt><dd>{translate(result.category)}</dd></div>
