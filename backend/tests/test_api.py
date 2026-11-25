@@ -104,10 +104,15 @@ def test_guest_mobile_encryption_and_audited_contact_access(monkeypatch):
             db.add(User(email=staff["email"], password_hash=hasher.hash(staff["password"]), role="admin"))
             db.commit()
         assert client.get(path).status_code == 401
+        mobile_access = {"reason": "Review the contact details", "mobile_only": True}
+        assert client.post(path + "/contact", json=mobile_access).status_code == 401
         assert client.post("/api/auth/admin/login", json=staff).status_code == 200
         assert client.get(path).json()["intake"] == {"mobile": "•••• 1234", "verified": False}
         assert client.get(path).json()["assessment"]["summary"]
         assert client.post(path + "/contact", json={"reason": "Review the contact details"}).status_code == 403
+        mobile = client.post(path + "/contact", json=mobile_access)
+        assert mobile.status_code == 200 and mobile.json() == {"mobile": "+8801700001234"}
+        assert mobile.headers["cache-control"] == "no-store"
         monkeypatch.setattr(tickets, "contact_reviewers", {staff["email"]})
         contact = client.post(path + "/contact", json={"reason": "Review the contact details"})
         assert contact.json()["mobile"] == "+8801700001234"
@@ -137,6 +142,7 @@ def test_ticket_ownership_evidence_updates_and_legacy_password():
         created = client.post("/api/complaints", json=payload(title="Ticket with evidence", mobile=None))
         path = "/api/tickets/" + created.json()["id"]
         assert client.get(path).status_code == 200 and client.get(path).json()["estimate"] is None
+        assert client.post(path + "/contact", json={"reason": "Review the contact details", "mobile_only": True}).status_code == 403
         assert client.post(path + "/evidence", files={"file": ("unsafe.svg", b"<svg/>")}).status_code == 422
         assert client.post(path + "/evidence", files={"file": ("large.png", b"x" * 2100000)}).status_code == 413
         raw = io.BytesIO()
