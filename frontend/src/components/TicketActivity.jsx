@@ -24,6 +24,7 @@ const en = {
   contact: 'Contact and intake', noContact: 'No intake contact recorded.', verified: 'Mobile verified',
   unverified: 'Mobile unverified', reveal: 'View restricted details', reason: 'Reason for accessing restricted data',
   contactError: 'Contact access could not be completed.', hide: 'Hide restricted details',
+  revealMobile: 'Show full mobile number', hideMobile: 'Hide full mobile number',
   mobile: 'Mobile', ip: 'Connection address', device: 'Reported device', unknown: 'Unknown',
   positive: 'Positive', neutral: 'Neutral', negative: 'Negative', uncertain: 'Uncertain',
   promotional_language: 'Promotional language', potential_abuse: 'Potential abuse',
@@ -52,6 +53,7 @@ const bn = {
   contact: 'যোগাযোগ ও জমার তথ্য', noContact: 'যোগাযোগের তথ্য সংরক্ষিত নেই।', verified: 'মোবাইল যাচাই করা হয়েছে',
   unverified: 'মোবাইল যাচাই করা হয়নি', reveal: 'সুরক্ষিত তথ্য দেখুন', reason: 'তথ্য দেখার কারণ লিখুন',
   contactError: 'যোগাযোগের তথ্য দেখা যায়নি।', hide: 'সুরক্ষিত তথ্য লুকান',
+  revealMobile: 'সম্পূর্ণ মোবাইল নম্বর দেখুন', hideMobile: 'সম্পূর্ণ মোবাইল নম্বর লুকান',
   mobile: 'মোবাইল', ip: 'সংযোগের ঠিকানা', device: 'ডিভাইসের ধরন', unknown: 'অজানা',
   positive: 'ইতিবাচক', neutral: 'নিরপেক্ষ', negative: 'নেতিবাচক', uncertain: 'অনিশ্চিত',
   promotional_language: 'প্রচারমূলক ভাষা', potential_abuse: 'সম্ভাব্য আপত্তিকর ভাষা',
@@ -76,7 +78,8 @@ function AdminIntake({item, t, language, path}) {
     setBusy(true);
     setFailed(false);
     try {
-      setRestricted(await request(path + '/contact', {method: 'POST', body: JSON.stringify({reason})}));
+      const mobile_only = !item.can_reveal;
+      setRestricted(await request(path + '/contact', {method: 'POST', body: JSON.stringify({reason, mobile_only})}));
       setReason('');
     } catch {
       setFailed(true);
@@ -99,16 +102,18 @@ function AdminIntake({item, t, language, path}) {
     <section className="ticket-section">
       <h3>{t.contact}</h3>
       <p>{item.intake?.mobile ? <>{item.intake.mobile} · {t[item.intake.verified ? 'verified' : 'unverified']}</> : t.noContact}</p>
-      {item.intake && item.can_reveal && (restricted ? <>
+      {item.intake && (item.intake.mobile || item.can_reveal) && (restricted ? <>
         <dl className="ticket-definition">
           <div><dt>{t.mobile}</dt><dd>{restricted.mobile || t.unknown}</dd></div>
-          <div><dt>{t.ip}</dt><dd>{restricted.source_ip || t.unknown}</dd></div>
-          <div><dt>{t.device}</dt><dd>{t[restricted.device === 'mobile' ? 'mobileDevice' : restricted.device] || t.unknown}</dd></div>
+          {item.can_reveal && <>
+            <div><dt>{t.ip}</dt><dd>{restricted.source_ip || t.unknown}</dd></div>
+            <div><dt>{t.device}</dt><dd>{t[restricted.device === 'mobile' ? 'mobileDevice' : restricted.device] || t.unknown}</dd></div>
+          </>}
         </dl>
-        <button type="button" className="ticket-button" onClick={() => setRestricted(null)}>{t.hide}</button>
+        <button type="button" className="ticket-button" onClick={() => setRestricted(null)}>{t[item.can_reveal ? 'hide' : 'hideMobile']}</button>
       </> : <form onSubmit={reveal} className="ticket-form">
         <label>{t.reason}<input value={reason} onChange={event => setReason(event.target.value)} minLength={10} maxLength={300} required/></label>
-        <button type="submit" className="ticket-button" disabled={busy}>{t.reveal}</button>
+        <button type="submit" className="ticket-button" disabled={busy}>{t[item.can_reveal ? 'reveal' : 'revealMobile']}</button>
         {failed && <p role="alert">{t.contactError}</p>}
       </form>)}
     </section>

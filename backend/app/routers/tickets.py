@@ -159,14 +159,15 @@ def download_evidence(complaint_id: uuid.UUID, evidence_id: uuid.UUID, request: 
 @router.post("/{complaint_id}/contact")
 def reveal_contact(complaint_id: uuid.UUID, payload: ContactAccessInput, request: Request, db=Depends(get_db)):
     user, _ = get_session(request, db)
-    if user.role != "admin" or user.email not in contact_reviewers:
+    if user.role != "admin" or (not payload.mobile_only and user.email not in contact_reviewers):
         raise HTTPException(403, "Contact review permission required")
     throttle(request, "contact-reveal", 10, identity=str(user.id))
     intake = db.get(ComplaintIntake, str(complaint_id))
     if intake is None:
         raise HTTPException(404, "No contact record for this ticket")
     value = open_intake(intake)
-    action = json.dumps({"event": "contact_access", "reason": redact_contact(payload.reason)})
+    action = json.dumps({"event": "contact_access", "reason": redact_contact(payload.reason),
+                         "scope": "mobile" if payload.mobile_only else "intake"})
     db.add(Audit(actor_id=user.id, complaint_id=intake.complaint_id, action=action))
     db.commit()
-    return value
+    return {"mobile": value.get("mobile")} if payload.mobile_only else value

@@ -144,6 +144,7 @@ class FollowupInput(BaseModel):
 
 class ContactAccessInput(BaseModel):
     reason: str = Field(min_length=10, max_length=300)
+    mobile_only: bool = False
 
     @field_validator("reason")
     @classmethod
